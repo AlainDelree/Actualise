@@ -4,7 +4,10 @@ Voir CONCEPTION.md, sections « Format de version », « Deux fichiers
 version.json distincts » et « Vérification réseau — timeout strict ».
 """
 
+import logging
 from typing import Any
+
+import requests
 
 # Timeout strict (2 à 3 secondes) sur toute requête réseau de
 # vérification de version. Au-delà, la vérification est traitée comme
@@ -12,6 +15,14 @@ from typing import Any
 # installée (voir CONCEPTION.md, « Vérification réseau — timeout
 # strict » et « Décisions actées »).
 TIMEOUT_RESEAU_SECONDES = 3
+
+_LOGGER = logging.getLogger(__name__)
+
+# ``HEAD`` est une référence spéciale reconnue par raw.githubusercontent.com
+# qui résout toujours vers la branche par défaut du dépôt, sans avoir à la
+# connaître à l'avance ni à passer par l'API GitHub (voir CONCEPTION.md,
+# « Deux fichiers version.json distincts »).
+_GABARIT_URL_VERSION_JSON = "https://raw.githubusercontent.com/{depot}/HEAD/version.json"
 
 
 def verifier_version(depot_github: str, build_installe: int) -> dict[str, Any] | None:
@@ -26,4 +37,25 @@ def verifier_version(depot_github: str, build_installe: int) -> dict[str, Any] |
     (pas de mise à jour, ou échec réseau/timeout — repli silencieux,
     voir CONCEPTION.md « Décisions actées »).
     """
-    raise NotImplementedError
+    url = _GABARIT_URL_VERSION_JSON.format(depot=depot_github)
+
+    try:
+        reponse = requests.get(url, timeout=TIMEOUT_RESEAU_SECONDES)
+        reponse.raise_for_status()
+        distant = reponse.json()
+    except (requests.RequestException, ValueError) as erreur:
+        _LOGGER.debug("Échec de vérification de version pour %s : %s", depot_github, erreur)
+        return None
+
+    try:
+        build_distant = distant["build"]
+    except (KeyError, TypeError) as erreur:
+        _LOGGER.debug("version.json invalide pour %s : %s", depot_github, erreur)
+        return None
+
+    # Comparaison entière stricte — jamais de comparaison de chaînes
+    # (voir CONCEPTION.md, piège « "9" > "10" » lexicographique).
+    if int(build_distant) > build_installe:
+        return distant
+
+    return None
