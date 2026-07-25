@@ -233,12 +233,37 @@ def tache_verification_arriere_plan() -> None:
         _LOGGER.exception("Erreur inattendue dans la tâche de vérification en arrière-plan")
 
 
+def configurer_logging() -> None:
+    """Configure le logging global vers un fichier, avant tout autre
+    traitement de ``main()``.
+
+    Actualise sera packagé en ``--noconsole`` (voir CONCEPTION.md) : sans
+    fenêtre console, écrire sur stdout/stderr peut échouer silencieusement
+    sous Windows, d'où l'écriture vers un fichier plutôt que la console.
+    Le dossier de ``config.chemin_config_portable()`` peut ne pas encore
+    exister au tout premier lancement (avant même que ``config.json`` n'y
+    soit écrit) : il est créé si nécessaire. ``force=True`` garantit que
+    cette configuration s'applique même si le logging a déjà été
+    configuré (ex. appels répétés dans les tests).
+    """
+    chemin_log = config.chemin_config_portable() / "actualise.log"
+    chemin_log.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        filename=chemin_log,
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        force=True,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Orchestre la séquence de démarrage non bloquante d'Actualise.
 
     Voir CONCEPTION.md, « Séquence de démarrage — vérification non
     bloquante » pour le déroulé complet des étapes ci-dessous.
     """
+    configurer_logging()
+
     arguments = analyser_arguments(argv)
 
     # Étape 4 : bascule des mises à jour déjà téléchargées et validées

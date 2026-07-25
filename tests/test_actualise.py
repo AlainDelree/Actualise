@@ -8,6 +8,7 @@ vérification non bloquante » et « Garde-fou anti-boucle infinie ».
 """
 
 import json
+import logging
 import tempfile
 import unittest
 import zipfile
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock, call, patch
 
 from actualise import (
     appliquer_mises_a_jour_en_attente,
+    configurer_logging,
     lancer_application_cible,
     tache_verification_arriere_plan,
 )
@@ -129,6 +131,44 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
             mock_mise_a_jour.appliquer_manifeste.assert_not_called()
 
         self.mock_config.sauvegarder_config.assert_not_called()
+
+
+class TestConfigurerLogging(unittest.TestCase):
+    def setUp(self):
+        self.dossier_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dossier_temp.cleanup)
+
+        racine_logging = logging.getLogger()
+        handlers_originaux = racine_logging.handlers[:]
+        niveau_original = racine_logging.level
+
+        def restaurer():
+            for handler in racine_logging.handlers[:]:
+                racine_logging.removeHandler(handler)
+                handler.close()
+            for handler in handlers_originaux:
+                racine_logging.addHandler(handler)
+            racine_logging.setLevel(niveau_original)
+
+        self.addCleanup(restaurer)
+
+    @patch("actualise.config")
+    def test_configure_un_fichier_dans_chemin_config_portable(self, mock_config):
+        dossier_config = Path(self.dossier_temp.name) / "config_actualise_absent"
+        mock_config.chemin_config_portable.return_value = dossier_config
+
+        configurer_logging()
+
+        racine_logging = logging.getLogger()
+        fichiers_journal = [
+            Path(handler.baseFilename)
+            for handler in racine_logging.handlers
+            if isinstance(handler, logging.FileHandler)
+        ]
+
+        self.assertEqual(len(fichiers_journal), 1)
+        self.assertEqual(fichiers_journal[0], dossier_config / "actualise.log")
+        self.assertTrue(dossier_config.is_dir())
 
 
 class TestLancerApplicationCible(unittest.TestCase):
