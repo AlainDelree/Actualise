@@ -23,10 +23,15 @@ La comparaison de version se fait via un **entier incrémental**
 chaînes brute :
 
 ```json
-{"build": 47}
+{"build": 47, "sha256": "<hash hexadécimal du zip publié pour ce build>"}
 ```
 
 Comparaison : `distant.build > local.build`.
+
+Le champ `sha256` porte sur le **zip complet** (l'asset de Release tel
+que publié), pas sur son contenu individuel une fois extrait — c'est un
+hash de vérification de l'intégrité du téléchargement, pas du contenu
+applicatif (voir « Séquence de démarrage » pour son usage).
 
 **Piège explicite à éviter** : comparer `version.json` comme des
 chaînes de caractères donne un résultat lexicographiquement incorrect
@@ -130,9 +135,18 @@ jamais le réseau.**
      l'application cible (deux vérifications indépendantes, chacune
      avec le timeout strict ci-dessus) ;
    - télécharge (depuis les GitHub Releases correspondantes) toute
-     nouvelle version trouvée, et la place en zone d'attente locale —
-     **pour le prochain lancement**, jamais pour le lancement en cours ;
-   - si une nouvelle version a été téléchargée, envoie une
+     nouvelle version trouvée ; **avant** de la placer en zone d'attente
+     locale, Actualise calcule le SHA-256 du zip reçu et le compare au
+     champ `sha256` annoncé dans le `version.json` correspondant :
+     - **correspondance** → le zip est placé en zone d'attente locale,
+       bascule prévue au prochain lancement (comportement déjà décrit
+       ci-dessus) ;
+     - **non-correspondance** → le téléchargement est rejeté (zip
+       corrompu ou tronqué), aucune zone d'attente n'est mise à jour,
+       nouvelle tentative au prochain cycle de vérification en
+       arrière-plan — même repli que pour un échec réseau : ne jamais
+       toucher à l'installation existante ;
+   - si une nouvelle version a été téléchargée **et validée**, envoie une
      **notification ntfy informative** (mise à jour prête, effective au
      prochain lancement).
 4. Au **lancement suivant**, avant de relancer l'application cible,
@@ -157,6 +171,16 @@ jamais le réseau.**
    - si une nouvelle version de l'application cible est en attente, ces
      trois étapes sont appliquées avant le lancement (étape 2) de ce
      lancement.
+
+**Choix écarté : liste de fichiers attendus post-extraction.** Une
+vérification de type « liste des fichiers attendus après extraction du
+zip » a été envisagée puis écartée : sa couverture est jugée redondante
+une fois le SHA-256 du zip validé (le contenu de l'archive est déjà
+garanti intègre avant extraction). Une extraction incomplète malgré un
+zip validé relèverait d'un problème d'environnement local (disque
+plein, permissions insuffisantes), détectable par une simple
+vérification d'erreur d'extraction plutôt que par une liste de fichiers
+à maintenir en parallèle du manifeste.
 
 **Conséquence assumée** : dans tous les cas (réseau bon, lent ou coupé),
 l'utilisateur ne perçoit **aucun délai** au lancement. Le compromis en
@@ -218,6 +242,7 @@ sans nécessiter de compteur ni d'état persistant à gérer.
 | Manifeste de mise à jour | `manifest.json` à la racine du zip (`{"build": N, "supprimer": [...]}`) ; `supprimer` est une liste noire optionnelle de chemins à effacer après extraction — fail-safe (un oubli laisse un fichier obsolète, jamais une perte de données) ; script `.bat`/`.sh` exécutable écarté pour portabilité Linux/Windows et sécurité (pas d'exécution de code téléchargé sans supervision) |
 | Timeout réseau | 2 à 3 secondes sur toute requête de vérification de version ; dépassement traité comme échec réseau |
 | Séquence de démarrage | Non bloquante : lancement immédiat de l'application cible dans sa version installée ; vérification et téléchargement en arrière-plan, appliqués au lancement suivant ; notification ntfy si mise à jour prête |
+| Vérification SHA-256 du zip | `version.json` porte un champ `sha256` du zip complet publié ; après téléchargement, avant mise en zone d'attente, comparaison du SHA-256 calculé sur le fichier reçu ; non-correspondance → téléchargement rejeté, aucune zone d'attente mise à jour, nouvelle tentative au cycle suivant (même repli que pour un échec réseau) ; liste de fichiers attendus post-extraction écartée (redondante une fois le zip validé, une extraction incomplète relevant d'un problème d'environnement local détectable par vérification d'erreur d'extraction) |
 | Bootstrap séparé | Écarté pour l'instant — Actualise reste un exécutable unique qui se met à jour lui-même, avec le garde-fou par marqueur ci-dessus |
 | Garde-fou anti-boucle | Marqueur explicite transmis parent → enfant (env `ACTUALISE_CHILD=1` ou arg `--child`), déclenché uniquement lors de la bascule d'une mise à jour déjà téléchargée — voir section dédiée ci-dessus |
 | Configuration portable | `C:\Actualise\` sous Windows, équivalent portable sous Linux (ex. `~/.config/actualise/` ou variable d'environnement) pour préserver la réutilisabilité Linux |
