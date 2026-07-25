@@ -112,6 +112,60 @@ raisons :
   explicites — le manifeste JSON ne permet structurellement rien d'autre
   que cette suppression bornée.
 
+## Contenu de `config.json`
+
+Reprend la base déjà actée (version actuelle, dépôt GitHub cible,
+répertoire d'installation, chemin portable Linux/Windows) et y ajoute
+les champs nécessaires au fonctionnement complet décrit ci-dessus
+(vérification de version, distribution en zip, notifications) :
+
+```json
+{
+  "actualise": {
+    "build_installe": 12,
+    "depot_github": "AlainDelree/Actualise"
+  },
+  "application_cible": {
+    "nom": "Scrabble",
+    "depot_github": "AlainDelree/Scrabble",
+    "build_installe": 47,
+    "repertoire_installation": "C:\\Scrabble\\",
+    "executable": "Scrabble.exe"
+  },
+  "zone_attente": "C:\\Actualise\\attente\\",
+  "topic_ntfy": "actualise-scrabble"
+}
+```
+
+Détail des champs :
+
+- `build_installe` (sous `actualise` **et** sous `application_cible`,
+  séparément) : le numéro de build actuellement installé pour ce
+  programme, directement comparable au champ `build` du `version.json`
+  correspondant (voir « Format de version »).
+- `depot_github` (sous `actualise` **et** sous `application_cible`) :
+  sert à construire l'URL du `version.json` correspondant (voir « Deux
+  fichiers `version.json` distincts »).
+- `executable` : nom/chemin du fichier exécutable à lancer pour
+  l'application cible, une fois la bascule éventuelle effectuée (étape
+  3 de la « Séquence de démarrage »).
+- `repertoire_installation` : dossier cible pour l'extraction du zip de
+  mise à jour de l'application cible.
+- `zone_attente` : chemin du dossier où sont stockés les zip
+  téléchargés en arrière-plan avant bascule au lancement suivant —
+  commun à Actualise et à l'application cible. Ceci referme le point
+  resté ouvert dans « Points encore ouverts » sur l'emplacement de la
+  zone d'attente locale.
+- `topic_ntfy` : topic ntfy dédié à ce programme, cohérent avec la
+  décision actée « un topic ntfy dédié par programme géré » (voir
+  « Décisions actées »).
+
+`repertoire_installation` et `zone_attente` suivent la même logique de
+portabilité déjà actée pour `config.json` lui-même : chemin Windows par
+défaut (ex. `C:\Scrabble\`, `C:\Actualise\attente\`), équivalent
+portable pour Linux (ex. `~/.config/actualise/` ou variable
+d'environnement).
+
 ## Vérification réseau — timeout strict
 
 Toute requête HTTP de vérification de version (`version.json`, Actualise
@@ -246,15 +300,10 @@ sans nécessiter de compteur ni d'état persistant à gérer.
 | Bootstrap séparé | Écarté pour l'instant — Actualise reste un exécutable unique qui se met à jour lui-même, avec le garde-fou par marqueur ci-dessus |
 | Garde-fou anti-boucle | Marqueur explicite transmis parent → enfant (env `ACTUALISE_CHILD=1` ou arg `--child`), déclenché uniquement lors de la bascule d'une mise à jour déjà téléchargée — voir section dédiée ci-dessus |
 | Configuration portable | `C:\Actualise\` sous Windows, équivalent portable sous Linux (ex. `~/.config/actualise/` ou variable d'environnement) pour préserver la réutilisabilité Linux |
+| Contenu de `config.json` | Deux blocs `actualise`/`application_cible` portant chacun `build_installe` et `depot_github` ; `application_cible` porte en plus `nom`, `repertoire_installation`, `executable` ; `zone_attente` (chemin de la zone d'attente locale) et `topic_ntfy` au niveau racine — voir « Contenu de `config.json` » |
 
 ## Points encore ouverts
 
-- Contenu détaillé de `config.json` au-delà de "version actuelle, dépôt
-  GitHub, répertoire".
-- Emplacement exact de la zone d'attente locale pour les archives zip
-  téléchargées en arrière-plan (Actualise et application cible) avant
-  bascule au lancement suivant (le format, lui, est désormais acté :
-  zip + `manifest.json`, voir « Manifeste de mise à jour »).
 - Interaction avec le futur `setup.exe` de Scrabble.
 
 ## Points de vigilance connus
