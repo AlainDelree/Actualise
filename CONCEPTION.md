@@ -56,6 +56,13 @@ Téléchargement via l'URL stable :
 github.com/<owner>/<repo>/releases/download/<tag>/<fichier>
 ```
 
+L'asset de Release n'est **pas un exécutable nu** : une mise à jour peut
+comporter plus que le seul exécutable (données, dictionnaires, DLL
+éventuelles). L'asset est donc une **archive zip** regroupant l'ensemble
+des fichiers nécessaires à cette version, ainsi que le manifeste de mise
+à jour (voir « Manifeste de mise à jour » ci-dessous) — **un seul asset
+par tag de version**, quel que soit le nombre de fichiers concernés.
+
 Un diff binaire a été **écarté** : gain marginal face à la complexité
 ajoutée, les binaires PyInstaller étant recompilés en quasi-totalité à
 chaque changement de code (peu de contenu partagé d'une version à
@@ -65,6 +72,40 @@ l'autre pour qu'un diff soit rentable).
 normalement** dans le dépôt (pas un asset de Release) — il doit rester
 trivialement accessible via `raw.githubusercontent.com` sans passer par
 l'API Releases.
+
+## Manifeste de mise à jour
+
+Chaque archive zip de Release inclut, à sa racine, un fichier
+`manifest.json` déclarant le build et les fichiers obsolètes à nettoyer
+après extraction :
+
+```json
+{"build": 47, "supprimer": ["ancien_dictionnaire.txt", "config_v1.ini"]}
+```
+
+- `build` : entier incrémental, cohérent avec le `version.json` déjà
+  acté (voir « Format de version »).
+- `supprimer` : liste **optionnelle** de chemins relatifs (au dossier
+  d'installation) à supprimer après extraction du zip. C'est une **liste
+  noire explicite** : seuls les chemins listés sont supprimés, rien
+  d'autre n'est touché — **fail-safe** par construction, puisqu'un oubli
+  dans cette liste laisse au pire un fichier obsolète inoffensif sur le
+  disque, jamais une perte de données par suppression involontaire
+  (contrairement à une logique de liste blanche, où un oubli pourrait
+  effacer un fichier qui aurait dû être conservé).
+
+**Choix écarté : script exécutable (`.bat` / `.sh`) en post-traitement.**
+Un manifeste JSON déclaratif a été préféré à un script pour deux
+raisons :
+
+- **Portabilité Linux/Windows** : un `.bat` n'a pas d'équivalent direct
+  côté Linux, ce qui imposerait une double maintenance (`.bat` et `.sh`)
+  incompatible avec la réutilisabilité Linux visée par le projet.
+- **Sécurité** : exécuter un script téléchargé sans supervision de
+  l'utilisateur ouvre une surface de risque bien plus large qu'une
+  simple opération de suppression bornée à une liste de chemins
+  explicites — le manifeste JSON ne permet structurellement rien d'autre
+  que cette suppression bornée.
 
 ## Vérification réseau — timeout strict
 
@@ -95,16 +136,26 @@ jamais le réseau.**
      **notification ntfy informative** (mise à jour prête, effective au
      prochain lancement).
 4. Au **lancement suivant**, avant de relancer l'application cible,
-   Actualise applique les mises à jour mises en attente :
-   - si une nouvelle version d'Actualise est en attente, l'exécutable
-     est basculé par renommage puis Actualise relance une **2ème
+   Actualise applique les mises à jour mises en attente. Pour chaque
+   mise à jour en attente (Actualise ou application cible), la bascule
+   comprend désormais trois étapes, dans l'ordre :
+   1. **extraction du zip** téléchargé dans le dossier d'installation
+      (écrase les fichiers existants de même nom, ajoute les nouveaux) ;
+   2. **application du manifeste** : suppression des fichiers listés
+      dans `supprimer` (voir « Manifeste de mise à jour ») ;
+   3. **lancement de l'application** fraîchement mise à jour.
+
+   Le détail selon qu'il s'agit d'Actualise lui-même ou de l'application
+   cible :
+   - si une nouvelle version d'Actualise est en attente, ces trois
+     étapes sont suivies d'un relancement d'Actualise comme **2ème
      instance** de lui-même (la version fraîchement installée) avec le
      **marqueur explicite** parent → enfant décrit ci-dessous, avant de
-     terminer le parent ; cette bascule est une opération locale
-     (renommage de fichier), donc quasi instantanée — elle ne réintroduit
-     pas d'attente réseau perceptible ;
-   - si une nouvelle version de l'application cible est en attente, elle
-     est basculée par renommage avant le lancement (étape 2) de ce
+     terminer le parent ; ces opérations restent locales (extraction de
+     zip, suppressions ciblées), donc quasi instantanées — elles ne
+     réintroduisent pas d'attente réseau perceptible ;
+   - si une nouvelle version de l'application cible est en attente, ces
+     trois étapes sont appliquées avant le lancement (étape 2) de ce
      lancement.
 
 **Conséquence assumée** : dans tous les cas (réseau bon, lent ou coupé),
@@ -162,8 +213,9 @@ sans nécessiter de compteur ni d'état persistant à gérer.
 | Notifications | Un topic ntfy dédié par programme géré ; notification informative envoyée quand une mise à jour a été téléchargée en arrière-plan (effective au prochain lancement) |
 | Format de version | `version.json` avec entier incrémental `build` (ex. `{"build": 47}`), comparaison `>` entre entiers — pas de semver ni de comparaison de chaînes brute (piège "9" > "10" lexicographique) |
 | Fichiers `version.json` | Deux fichiers distincts et indépendants : un dans le dépôt Actualise, un dans le dépôt de chaque application cible (URL construite depuis `config.json`) |
-| Distribution des binaires | Assets de GitHub Releases (URL stable `releases/download/<tag>/<fichier>`), pas commités dans l'historique ; diff binaire écarté (gain marginal, binaires PyInstaller recompilés quasi-intégralement à chaque changement) |
+| Distribution des binaires | Assets de GitHub Releases (URL stable `releases/download/<tag>/<fichier>`), pas commités dans l'historique ; **un seul asset par tag, sous forme d'archive zip** contenant tous les fichiers de la version (exécutable, données, DLL) et le manifeste ; diff binaire écarté (gain marginal, binaires PyInstaller recompilés quasi-intégralement à chaque changement) |
 | `version.json` (stockage) | Reste un petit fichier commité normalement dans le dépôt, pas un asset de Release |
+| Manifeste de mise à jour | `manifest.json` à la racine du zip (`{"build": N, "supprimer": [...]}`) ; `supprimer` est une liste noire optionnelle de chemins à effacer après extraction — fail-safe (un oubli laisse un fichier obsolète, jamais une perte de données) ; script `.bat`/`.sh` exécutable écarté pour portabilité Linux/Windows et sécurité (pas d'exécution de code téléchargé sans supervision) |
 | Timeout réseau | 2 à 3 secondes sur toute requête de vérification de version ; dépassement traité comme échec réseau |
 | Séquence de démarrage | Non bloquante : lancement immédiat de l'application cible dans sa version installée ; vérification et téléchargement en arrière-plan, appliqués au lancement suivant ; notification ntfy si mise à jour prête |
 | Bootstrap séparé | Écarté pour l'instant — Actualise reste un exécutable unique qui se met à jour lui-même, avec le garde-fou par marqueur ci-dessus |
@@ -174,9 +226,10 @@ sans nécessiter de compteur ni d'état persistant à gérer.
 
 - Contenu détaillé de `config.json` au-delà de "version actuelle, dépôt
   GitHub, répertoire".
-- Emplacement et format exacts de la zone d'attente locale pour les
-  binaires téléchargés en arrière-plan (Actualise et application
-  cible) avant bascule au lancement suivant.
+- Emplacement exact de la zone d'attente locale pour les archives zip
+  téléchargées en arrière-plan (Actualise et application cible) avant
+  bascule au lancement suivant (le format, lui, est désormais acté :
+  zip + `manifest.json`, voir « Manifeste de mise à jour »).
 - Interaction avec le futur `setup.exe` de Scrabble.
 
 ## Points de vigilance connus
