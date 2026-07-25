@@ -7,7 +7,30 @@ infinie » pour le rôle de l'argument ``--child``.
 """
 
 import argparse
+import json
+import logging
+import re
+import shutil
+import subprocess
+import sys
 import threading
+import zipfile
+from pathlib import Path
+
+import config
+import mise_a_jour
+import notifications
+import version_check
+
+_LOGGER = logging.getLogger(__name__)
+
+# Gabarit de l'URL d'un asset de Release GitHub (voir CONCEPTION.md,
+# « Distribution des binaires — GitHub Releases »). Le numéro de build
+# sert directement de tag (ex. ``v48``) : simple, lisible, et cohérent
+# avec l'entier incrémental déjà acté comme identifiant de version
+# (voir « Format de version ») — à documenter/adapter si un autre
+# format de tag devait un jour être retenu.
+_GABARIT_URL_RELEASE = "https://github.com/{depot}/releases/download/v{build}/{fichier}"
 
 
 def analyser_arguments(argv: list[str] | None = None) -> argparse.Namespace:
@@ -27,6 +50,51 @@ def analyser_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return analyseur.parse_args(argv)
 
 
+def _prefixe_pour(nom: str) -> str:
+    """Dérive le préfixe de nommage en zone d'attente à partir du nom
+    d'un programme (ex. ``"Scrabble"`` → ``"scrabble"``).
+
+    Voir CONCEPTION.md, « Nommage versionné des zips en zone d'attente »
+    (ex. ``scrabble_112.zip`` pour un ``config["application_cible"]["nom"]``
+    valant ``"Scrabble"``).
+    """
+    return nom.lower()
+
+
+def _chercher_zip_en_attente(zone_attente: Path, prefixe: str) -> tuple[Path, int] | None:
+    """Cherche dans ``zone_attente`` un fichier ``<prefixe>_<build>.zip``.
+
+    Retourne son chemin et le ``build`` extrait du nom de fichier, ou
+    ``None`` si aucun fichier de ce préfixe n'est présent. Voir
+    CONCEPTION.md, « Nommage versionné des zips en zone d'attente ».
+    """
+    if not zone_attente.is_dir():
+        return None
+
+    motif = re.compile(rf"^{re.escape(prefixe)}_(\d+)\.zip$")
+    for chemin in zone_attente.iterdir():
+        correspondance = motif.match(chemin.name)
+        if correspondance:
+            return chemin, int(correspondance.group(1))
+
+    return None
+
+
+def _relancer_en_enfant() -> None:
+    """Relance une 2ème instance d'Actualise avec le marqueur ``--child``.
+
+    Voir CONCEPTION.md, « Garde-fou anti-boucle infinie ». Gère aussi
+    bien le cas d'un exécutable PyInstaller gelé (``sys.frozen``) que
+    l'exécution directe du script Python.
+    """
+    if getattr(sys, "frozen", False):
+        commande = [sys.executable, "--child"]
+    else:
+        commande = [sys.executable, str(Path(__file__).resolve()), "--child"]
+
+    subprocess.Popen(commande)
+
+
 def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
     """Applique, au lancement, les mises à jour mises en attente au
     cycle précédent (étape 4 de la séquence de démarrage).
@@ -35,7 +103,57 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
     étape est sautée inconditionnellement pour Actualise lui-même — voir
     CONCEPTION.md, « Garde-fou anti-boucle infinie ».
     """
-    raise NotImplementedError
+    if est_enfant:
+        return
+
+    configuration = config.charger_config()
+    zone_attente = Path(configuration["zone_attente"])
+
+    cibles = [
+        ("actualise", configuration["actualise"], config.chemin_config_portable()),
+        (
+            _prefixe_pour(configuration["application_cible"]["nom"]),
+            configuration["application_cible"],
+            Path(configuration["application_cible"]["repertoire_installation"]),
+        ),
+    ]
+
+    for prefixe, bloc_config, repertoire_installation in cibles:
+        resultat = _chercher_zip_en_attente(zone_attente, prefixe)
+        if resultat is None:
+            continue
+
+        chemin_zip, build_zip = resultat
+
+        if build_zip <= bloc_config["build_installe"]:
+            # Résidu obsolète (déjà appliqué à un cycle précédent, ou
+            # périmé) : nettoyage automatique sans bascule, voir
+            # CONCEPTION.md « Nommage versionné des zips en zone
+            # d'attente ».
+            chemin_zip.unlink()
+            continue
+
+        with zipfile.ZipFile(chemin_zip) as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+
+        mise_a_jour.extraire_zip(chemin_zip, repertoire_installation)
+        mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
+
+        bloc_config["build_installe"] = build_zip
+        config.sauvegarder_config(configuration)
+
+        chemin_zip.unlink()
+
+        if prefixe == "actualise":
+            # Une nouvelle version d'Actualise vient d'être installée :
+            # on relance la version fraîchement installée comme 2ème
+            # instance (marqueur --child), puis on termine ce process
+            # parent immédiatement, sans lancer l'application cible ni
+            # démarrer la tâche de fond — l'enfant reprend la suite de
+            # la séquence de démarrage à sa place. Voir CONCEPTION.md,
+            # « Garde-fou anti-boucle infinie ».
+            _relancer_en_enfant()
+            raise SystemExit(0)
 
 
 def lancer_application_cible() -> None:
@@ -44,7 +162,26 @@ def lancer_application_cible() -> None:
 
     Voir CONCEPTION.md, « Séquence de démarrage », étape 2.
     """
-    raise NotImplementedError
+    configuration = config.charger_config()
+    bloc_config = configuration["application_cible"]
+    chemin_executable = Path(bloc_config["repertoire_installation"]) / bloc_config["executable"]
+
+    # Popen sans wait() : cycles de vie indépendants dès le lancement
+    # (voir CONCEPTION.md, « Cycle de vie du processus Actualise »).
+    subprocess.Popen([str(chemin_executable)])
+
+
+def _url_asset_release(depot_github: str, build: int, prefixe: str) -> str:
+    """Construit l'URL de l'asset zip de Release GitHub pour ``build``.
+
+    Voir CONCEPTION.md, « Distribution des binaires — GitHub Releases » :
+    un seul asset zip par tag, le tag étant ``v<build>`` (ex. ``v48``).
+    Convention retenue ici pour le nom de fichier de l'asset publié :
+    ``<prefixe>.zip`` (ex. ``actualise.zip``, ``scrabble.zip``) — à
+    documenter/adapter si un autre nommage d'asset est publié côté
+    Release.
+    """
+    return _GABARIT_URL_RELEASE.format(depot=depot_github, build=build, fichier=f"{prefixe}.zip")
 
 
 def tache_verification_arriere_plan() -> None:
@@ -52,9 +189,48 @@ def tache_verification_arriere_plan() -> None:
     (Actualise et application cible), notifie via ntfy si une mise à
     jour est prête.
 
-    Voir CONCEPTION.md, « Séquence de démarrage », étape 3.
+    Voir CONCEPTION.md, « Séquence de démarrage », étape 3. Toute
+    exception inattendue est capturée et loguée : cette tâche tourne
+    dans un thread séparé, sans supervision, et ne doit jamais faire
+    planter le programme.
     """
-    raise NotImplementedError
+    try:
+        configuration = config.charger_config()
+        zone_attente = Path(configuration["zone_attente"])
+        zone_attente.mkdir(parents=True, exist_ok=True)
+
+        cibles = [
+            ("actualise", configuration["actualise"]),
+            (
+                _prefixe_pour(configuration["application_cible"]["nom"]),
+                configuration["application_cible"],
+            ),
+        ]
+
+        for prefixe, bloc_config in cibles:
+            distant = version_check.verifier_version(
+                bloc_config["depot_github"], bloc_config["build_installe"]
+            )
+            if distant is None:
+                continue
+
+            build_distant = distant["build"]
+            url = _url_asset_release(bloc_config["depot_github"], build_distant, prefixe)
+
+            chemin_telecharge = mise_a_jour.telecharger_zip(url, distant["sha256"])
+            if chemin_telecharge is None:
+                continue
+
+            chemin_zone_attente = zone_attente / f"{prefixe}_{build_distant}.zip"
+            shutil.move(str(chemin_telecharge), str(chemin_zone_attente))
+
+            notifications.notifier_ntfy(
+                configuration["topic_ntfy"],
+                f"Mise à jour disponible pour {prefixe} (build {build_distant}) : "
+                "elle sera appliquée au prochain lancement.",
+            )
+    except Exception:
+        _LOGGER.exception("Erreur inattendue dans la tâche de vérification en arrière-plan")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # Étape 4 : bascule des mises à jour déjà téléchargées et validées
     # au cycle précédent (sautée pour Actualise si --child est présent).
+    # Si une bascule d'Actualise lui-même vient d'avoir lieu, cette
+    # fonction termine le process (SystemExit) avant de revenir ici.
     appliquer_mises_a_jour_en_attente(est_enfant=arguments.child)
 
     # Étape 2 : lancement immédiat de l'application cible, sans attendre
@@ -79,6 +257,11 @@ def main(argv: list[str] | None = None) -> int:
         target=tache_verification_arriere_plan, daemon=True
     )
     thread_verification.start()
+
+    # Cycle de vie d'Actualise : on attend la fin de la tâche de fond
+    # (pas celle de l'application cible) avant de terminer — voir
+    # CONCEPTION.md, « Cycle de vie du processus Actualise ».
+    thread_verification.join()
 
     return 0
 
