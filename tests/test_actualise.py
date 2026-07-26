@@ -132,6 +132,74 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
 
         self.mock_config.sauvegarder_config.assert_not_called()
 
+    def test_plusieurs_zips_meme_prefixe_le_plus_eleve_applique_lautre_supprime(self):
+        chemin_zip_bas = self.zone_attente / "scrabble_48.zip"
+        chemin_zip_haut = self.zone_attente / "scrabble_49.zip"
+        _creer_zip_avec_manifest(chemin_zip_bas, build=48)
+        _creer_zip_avec_manifest(chemin_zip_haut, build=49)
+
+        with patch("actualise.mise_a_jour") as mock_mise_a_jour:
+            appliquer_mises_a_jour_en_attente(est_enfant=False)
+
+            mock_mise_a_jour.extraire_zip.assert_called_once_with(
+                chemin_zip_haut, self.repertoire_cible
+            )
+
+        self.assertFalse(chemin_zip_haut.exists())
+        self.assertFalse(chemin_zip_bas.exists())
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 49)
+
+    def test_manifest_absent_zip_conserve_aucune_bascule(self):
+        chemin_zip = self.zone_attente / "scrabble_48.zip"
+        with zipfile.ZipFile(chemin_zip, "w") as archive:
+            archive.writestr("fichier.txt", "contenu")
+
+        with patch("actualise.mise_a_jour") as mock_mise_a_jour:
+            appliquer_mises_a_jour_en_attente(est_enfant=False)
+
+            mock_mise_a_jour.extraire_zip.assert_not_called()
+            mock_mise_a_jour.appliquer_manifeste.assert_not_called()
+
+        self.assertTrue(chemin_zip.exists())
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
+        self.mock_config.sauvegarder_config.assert_not_called()
+
+    def test_zip_corrompu_zip_conserve_aucune_bascule(self):
+        chemin_zip = self.zone_attente / "scrabble_48.zip"
+        chemin_zip.write_text("ceci n'est pas un zip")
+
+        with patch("actualise.mise_a_jour") as mock_mise_a_jour:
+            appliquer_mises_a_jour_en_attente(est_enfant=False)
+
+            mock_mise_a_jour.extraire_zip.assert_not_called()
+            mock_mise_a_jour.appliquer_manifeste.assert_not_called()
+
+        self.assertTrue(chemin_zip.exists())
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
+        self.mock_config.sauvegarder_config.assert_not_called()
+
+    def test_zone_attente_inexistante_aucune_exception(self):
+        self.zone_attente.rmdir()
+
+        with patch("actualise.mise_a_jour") as mock_mise_a_jour:
+            appliquer_mises_a_jour_en_attente(est_enfant=False)
+
+            mock_mise_a_jour.extraire_zip.assert_not_called()
+            mock_mise_a_jour.appliquer_manifeste.assert_not_called()
+
+        self.mock_config.sauvegarder_config.assert_not_called()
+
+    def test_config_incomplete_keyerror_levee_avec_log_derreur(self):
+        del self.configuration["application_cible"]
+
+        with patch("actualise.mise_a_jour"), self.assertLogs(
+            "actualise", level="ERROR"
+        ) as journal:
+            with self.assertRaises(KeyError):
+                appliquer_mises_a_jour_en_attente(est_enfant=False)
+
+        self.assertTrue(any("config.json" in message for message in journal.output))
+
 
 class TestConfigurerLogging(unittest.TestCase):
     def setUp(self):

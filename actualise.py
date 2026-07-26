@@ -65,19 +65,37 @@ def _chercher_zip_en_attente(zone_attente: Path, prefixe: str) -> tuple[Path, in
     """Cherche dans ``zone_attente`` un fichier ``<prefixe>_<build>.zip``.
 
     Retourne son chemin et le ``build`` extrait du nom de fichier, ou
-    ``None`` si aucun fichier de ce préfixe n'est présent. Voir
-    CONCEPTION.md, « Nommage versionné des zips en zone d'attente ».
+    ``None`` si aucun fichier de ce préfixe n'est présent (y compris si
+    ``zone_attente`` lui-même n'existe pas encore, cas du tout premier
+    lancement). Voir CONCEPTION.md, « Nommage versionné des zips en zone
+    d'attente ».
+
+    **Cas limite : plusieurs zips du même préfixe.** Seul celui au build
+    le plus élevé est retourné ; tous les autres sont des résidus
+    dépassés (voir CONCEPTION.md, cas limite dédié) et sont supprimés
+    immédiatement ici même, sans être appliqués — ce choix
+    d'implémentation garde l'appelant simple (il ne reçoit jamais qu'un
+    seul candidat à traiter).
     """
     if not zone_attente.is_dir():
         return None
 
     motif = re.compile(rf"^{re.escape(prefixe)}_(\d+)\.zip$")
+    candidats = []
     for chemin in zone_attente.iterdir():
         correspondance = motif.match(chemin.name)
         if correspondance:
-            return chemin, int(correspondance.group(1))
+            candidats.append((chemin, int(correspondance.group(1))))
 
-    return None
+    if not candidats:
+        return None
+
+    candidats.sort(key=lambda candidat: candidat[1], reverse=True)
+    meilleur, *residus = candidats
+    for chemin_residu, _ in residus:
+        chemin_residu.unlink()
+
+    return meilleur
 
 
 def _relancer_en_enfant() -> None:
@@ -107,53 +125,89 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
         return
 
     configuration = config.charger_config()
-    zone_attente = Path(configuration["zone_attente"])
 
-    cibles = [
-        ("actualise", configuration["actualise"], config.chemin_config_portable()),
-        (
-            _prefixe_pour(configuration["application_cible"]["nom"]),
-            configuration["application_cible"],
-            Path(configuration["application_cible"]["repertoire_installation"]),
-        ),
-    ]
+    try:
+        zone_attente = Path(configuration["zone_attente"])
 
-    for prefixe, bloc_config, repertoire_installation in cibles:
-        resultat = _chercher_zip_en_attente(zone_attente, prefixe)
-        if resultat is None:
-            continue
+        cibles = [
+            ("actualise", configuration["actualise"], config.chemin_config_portable()),
+            (
+                _prefixe_pour(configuration["application_cible"]["nom"]),
+                configuration["application_cible"],
+                Path(configuration["application_cible"]["repertoire_installation"]),
+            ),
+        ]
 
-        chemin_zip, build_zip = resultat
+        for prefixe, bloc_config, repertoire_installation in cibles:
+            resultat = _chercher_zip_en_attente(zone_attente, prefixe)
+            if resultat is None:
+                continue
 
-        if build_zip <= bloc_config["build_installe"]:
-            # Résidu obsolète (déjà appliqué à un cycle précédent, ou
-            # périmé) : nettoyage automatique sans bascule, voir
-            # CONCEPTION.md « Nommage versionné des zips en zone
-            # d'attente ».
+            chemin_zip, build_zip = resultat
+
+            if build_zip <= bloc_config["build_installe"]:
+                # Résidu obsolète (déjà appliqué à un cycle précédent, ou
+                # périmé) : nettoyage automatique sans bascule, voir
+                # CONCEPTION.md « Nommage versionné des zips en zone
+                # d'attente ».
+                chemin_zip.unlink()
+                continue
+
+            try:
+                with zipfile.ZipFile(chemin_zip) as archive:
+                    manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            except zipfile.BadZipFile:
+                # Zip corrompu ou pas un zip valide : bloquant, même
+                # traitement qu'un manifeste absent ci-dessous — voir
+                # CONCEPTION.md, « Manifeste de mise à jour », cas
+                # limite dédié.
+                _LOGGER.warning(
+                    "Zip de mise à jour invalide en zone d'attente (%s) : "
+                    "bascule ignorée, zip conservé pour nouvelle tentative.",
+                    chemin_zip,
+                )
+                continue
+            except KeyError:
+                # manifest.json absent de l'archive : traité comme
+                # bloquant, zip conservé pour nouvelle tentative
+                # ultérieure — voir CONCEPTION.md, « Manifeste de mise
+                # à jour », cas limite dédié.
+                _LOGGER.warning(
+                    "manifest.json absent du zip de mise à jour (%s) : "
+                    "bascule ignorée, zip conservé pour nouvelle tentative.",
+                    chemin_zip,
+                )
+                continue
+
+            mise_a_jour.extraire_zip(chemin_zip, repertoire_installation)
+            mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
+
+            bloc_config["build_installe"] = build_zip
+            config.sauvegarder_config(configuration)
+
             chemin_zip.unlink()
-            continue
 
-        with zipfile.ZipFile(chemin_zip) as archive:
-            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
-
-        mise_a_jour.extraire_zip(chemin_zip, repertoire_installation)
-        mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
-
-        bloc_config["build_installe"] = build_zip
-        config.sauvegarder_config(configuration)
-
-        chemin_zip.unlink()
-
-        if prefixe == "actualise":
-            # Une nouvelle version d'Actualise vient d'être installée :
-            # on relance la version fraîchement installée comme 2ème
-            # instance (marqueur --child), puis on termine ce process
-            # parent immédiatement, sans lancer l'application cible ni
-            # démarrer la tâche de fond — l'enfant reprend la suite de
-            # la séquence de démarrage à sa place. Voir CONCEPTION.md,
-            # « Garde-fou anti-boucle infinie ».
-            _relancer_en_enfant()
-            raise SystemExit(0)
+            if prefixe == "actualise":
+                # Une nouvelle version d'Actualise vient d'être installée :
+                # on relance la version fraîchement installée comme 2ème
+                # instance (marqueur --child), puis on termine ce process
+                # parent immédiatement, sans lancer l'application cible ni
+                # démarrer la tâche de fond — l'enfant reprend la suite de
+                # la séquence de démarrage à sa place. Voir CONCEPTION.md,
+                # « Garde-fou anti-boucle infinie ».
+                _relancer_en_enfant()
+                raise SystemExit(0)
+    except KeyError:
+        # Champ obligatoire manquant dans config.json : cohérent avec le
+        # choix déjà acté pour charger_config (config invalide = erreur
+        # bloquante, pas de repli silencieux) — la KeyError continue de
+        # remonter, mais avec un log explicite pour éviter une exception
+        # cryptique sans contexte.
+        _LOGGER.error(
+            "config.json incomplet : champ obligatoire manquant lors de "
+            "l'application des mises à jour en attente."
+        )
+        raise
 
 
 def lancer_application_cible() -> None:
