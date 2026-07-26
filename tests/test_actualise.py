@@ -19,6 +19,7 @@ from actualise import (
     appliquer_mises_a_jour_en_attente,
     configurer_logging,
     lancer_application_cible,
+    main,
     tache_verification_arriere_plan,
 )
 
@@ -334,6 +335,43 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
             mock_config.charger_config.side_effect = RuntimeError("boom")
 
             tache_verification_arriere_plan()
+
+
+class TestMain(unittest.TestCase):
+    """Voir CONCEPTION.md : ``main()`` doit loguer toute exception fatale
+    non anticipée par les except existants avant de la laisser se
+    propager (sinon ``actualise.log`` reste vide en ``--noconsole``),
+    sans jamais intercepter le ``SystemExit(0)`` volontaire du garde-fou
+    anti-boucle.
+    """
+
+    def setUp(self):
+        self.dossier_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dossier_temp.cleanup)
+
+        patcher_config = patch("actualise.config")
+        self.mock_config = patcher_config.start()
+        self.addCleanup(patcher_config.stop)
+        self.mock_config.chemin_config_portable.return_value = Path(self.dossier_temp.name)
+
+    def test_exception_fatale_dans_main_loguee_et_propagee(self):
+        with patch("actualise.appliquer_mises_a_jour_en_attente"), patch(
+            "actualise.lancer_application_cible", side_effect=RuntimeError("boum fatal")
+        ), self.assertLogs("actualise", level="ERROR") as journal:
+            with self.assertRaises(RuntimeError):
+                main([])
+
+        self.assertTrue(any("erreur fatale" in message for message in journal.output))
+
+    def test_systemexit_relance_enfant_non_intercepte_ni_logue_comme_erreur(self):
+        with patch(
+            "actualise.appliquer_mises_a_jour_en_attente", side_effect=SystemExit(0)
+        ), patch("actualise.lancer_application_cible") as mock_lancer:
+            with self.assertNoLogs("actualise", level="ERROR"):
+                with self.assertRaises(SystemExit):
+                    main([])
+
+            mock_lancer.assert_not_called()
 
 
 if __name__ == "__main__":

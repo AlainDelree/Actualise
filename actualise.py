@@ -318,29 +318,43 @@ def main(argv: list[str] | None = None) -> int:
     """
     configurer_logging()
 
-    arguments = analyser_arguments(argv)
+    # Bloc englobant : sans lui, une exception non anticipée par les
+    # except existants (ex. config.json absent dès le tout premier
+    # lancement) remonte jusqu'à --noconsole sans jamais être loguée —
+    # seule une popup Windows technique s'affiche, sans rien
+    # d'exploitable conservé pour diagnostiquer à distance. On logue ici
+    # la stack trace complète puis on laisse l'exception se propager
+    # (code de sortie non nul inchangé) : le but est d'ajouter la trace
+    # au log, pas de supprimer le crash. ``SystemExit`` (ex. le
+    # ``SystemExit(0)`` volontaire du garde-fou anti-boucle) hérite de
+    # ``BaseException`` et n'est donc jamais intercepté ici.
+    try:
+        arguments = analyser_arguments(argv)
 
-    # Étape 4 : bascule des mises à jour déjà téléchargées et validées
-    # au cycle précédent (sautée pour Actualise si --child est présent).
-    # Si une bascule d'Actualise lui-même vient d'avoir lieu, cette
-    # fonction termine le process (SystemExit) avant de revenir ici.
-    appliquer_mises_a_jour_en_attente(est_enfant=arguments.child)
+        # Étape 4 : bascule des mises à jour déjà téléchargées et validées
+        # au cycle précédent (sautée pour Actualise si --child est présent).
+        # Si une bascule d'Actualise lui-même vient d'avoir lieu, cette
+        # fonction termine le process (SystemExit) avant de revenir ici.
+        appliquer_mises_a_jour_en_attente(est_enfant=arguments.child)
 
-    # Étape 2 : lancement immédiat de l'application cible, sans attendre
-    # le réseau.
-    lancer_application_cible()
+        # Étape 2 : lancement immédiat de l'application cible, sans attendre
+        # le réseau.
+        lancer_application_cible()
 
-    # Étape 3 : vérification et téléchargement en arrière-plan, sans
-    # bloquer l'utilisateur.
-    thread_verification = threading.Thread(
-        target=tache_verification_arriere_plan, daemon=True
-    )
-    thread_verification.start()
+        # Étape 3 : vérification et téléchargement en arrière-plan, sans
+        # bloquer l'utilisateur.
+        thread_verification = threading.Thread(
+            target=tache_verification_arriere_plan, daemon=True
+        )
+        thread_verification.start()
 
-    # Cycle de vie d'Actualise : on attend la fin de la tâche de fond
-    # (pas celle de l'application cible) avant de terminer — voir
-    # CONCEPTION.md, « Cycle de vie du processus Actualise ».
-    thread_verification.join()
+        # Cycle de vie d'Actualise : on attend la fin de la tâche de fond
+        # (pas celle de l'application cible) avant de terminer — voir
+        # CONCEPTION.md, « Cycle de vie du processus Actualise ».
+        thread_verification.join()
+    except Exception:
+        _LOGGER.exception("Actualise s'est arrêté sur une erreur fatale non gérée.")
+        raise
 
     return 0
 
