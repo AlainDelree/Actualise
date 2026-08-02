@@ -1,2 +1,13 @@
 __pycache__/
 *.pyc
+
+# Environnement virtuel de build (issue #328)
+.venv_build/
+
+# Sorties de build / packaging (PyInstaller, issue #328)
+build/
+dist/
+*.spec
+# Exception : le .spec de l'exécutable Windows est committé volontairement,
+# contrairement aux artefacts *.spec habituels (temporaires).
+!actualise.spec
