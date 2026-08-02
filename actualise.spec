@@ -5,19 +5,17 @@ Build : ``pyinstaller actualise.spec`` (depuis la racine du dépôt, avec
 l'environnement virtuel du projet activé — ``requests`` et ``pyinstaller``
 installés). Sortie en mode ``--onedir`` dans ``dist/Actualise/``.
 
-Actualise est un updater CLI (``argparse``, flag ``--child`` — voir
-``analyser_arguments`` dans ``actualise.py``), PAS une application graphique :
-build en ``console=True``, contrairement à Scrabble/Rummikub qui sont en
-``console=False``.
+Actualise doit rester invisible pendant que l'application cible tourne
+(voir CONCEPTION.md) : build en ``console=False`` (``--noconsole``), comme
+Scrabble/Rummikub. Le mécanisme de logging vers fichier
+(``actualise.configurer_logging``) existe précisément pour compenser
+l'absence de console — c'est la seule trace disponible en cas de problème.
 
-Note de cohérence (issue #328) : le docstring de
-``actualise.configurer_logging`` et CONCEPTION.md mentionnent encore un
-empaquetage ``--noconsole`` envisagé à l'origine ; ce choix a été révisé côté
-build (voir corps de l'issue #328, confirmé par CC) sans qu'aucune adaptation
-côté code applicatif ne soit nécessaire — le logging vers fichier fonctionne
-à l'identique qu'une console soit visible ou non. Cette documentation
-applicative n'a pas été mise à jour ici (hors périmètre du clone CCW) ; à
-signaler à Alain.
+Note de cohérence (issue #328, corrigée en issue #329) : un premier commit
+local avait empaqueté en ``console=True`` en argumentant qu'Actualise est un
+updater CLI (``argparse``, flag ``--child``) sans besoin d'interface
+graphique. Cette valeur était incohérente avec CONCEPTION.md et a été
+corrigée ici avant tout push vers origin.
 
 Données embarquées (``datas``)
 -------------------------------
@@ -70,7 +68,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,  # Updater CLI (argparse, --child) : pas d'interface graphique.
+    console=False,  # Invisible pendant que l'app cible tourne ; logging fichier compense (CONCEPTION.md).
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
