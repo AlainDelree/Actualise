@@ -313,6 +313,12 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
                     call("actualise-scrabble", unittest.mock.ANY),
                 ]
             )
+            for appel in mock_notifications.notifier_ntfy.call_args_list:
+                message = appel.args[1]
+                self.assertTrue(
+                    message.startswith("MAJ - "),
+                    f"le message ntfy devrait être préfixé par 'MAJ - ' : {message!r}",
+                )
 
         self.assertTrue((self.zone_attente / "actualise_11.zip").exists())
         self.assertTrue((self.zone_attente / "scrabble_48.zip").exists())

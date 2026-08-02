@@ -182,7 +182,17 @@ Détail des champs :
   zone d'attente locale.
 - `topic_ntfy` : topic ntfy dédié à ce programme, cohérent avec la
   décision actée « un topic ntfy dédié par programme géré » (voir
-  « Décisions actées »).
+  « Décisions actées »). **Cas particulier Scrabble** : pour ce projet
+  spécifiquement, `topic_ntfy` réutilise le topic déjà existant des
+  notifications d'issues fermées de Bridge_Agent pour Scrabble — pas de
+  topic dédié séparé créé, car seul Alain est abonné aux deux flux et le
+  préfixe `"MAJ - "` (voir « Décisions actées ») suffit à distinguer
+  visuellement les notifications d'Actualise des notifications de
+  clôture d'issue dans le même flux. Le principe général « un topic
+  ntfy dédié par programme géré » reste la règle par défaut pour de
+  futurs projets ayant un public destinataire différent (ex. un autre
+  utilisateur final abonné) ; Scrabble est un cas particulier documenté
+  comme tel, pas un changement de règle générale.
 
 `repertoire_installation` et `zone_attente` suivent la même logique de
 portabilité déjà actée pour `config.json` lui-même : chemin Windows par
@@ -419,7 +429,7 @@ applications cibles, Scrabble servant de premier exemple concret :
 | Comportement hors-ligne / échec réseau | Se rabat silencieusement sur le lancement de la version déjà installée, sans bloquer l'utilisateur final |
 | Raccourci utilisateur | Pointe vers Actualise, jamais directement vers l'application cible |
 | Configuration | Répertoire dédié type `C:\Actualise\` avec un fichier `config.json` reprenant : version actuelle de l'exe cible, dépôt GitHub cible, répertoire d'installation cible, et autres éléments à définir. Prévoir un chemin **portable** pour les tests/usage Linux (ex. `~/.config/actualise/` ou une variable d'environnement) en plus de `C:\Actualise\`, pour ne pas entamer la réutilisabilité Linux visée par le projet |
-| Notifications | Un topic ntfy dédié par programme géré ; notification informative envoyée quand une mise à jour a été téléchargée en arrière-plan (effective au prochain lancement) |
+| Notifications | Un topic ntfy dédié par programme géré (règle par défaut) ; notification informative envoyée quand une mise à jour a été téléchargée en arrière-plan (effective au prochain lancement), message préfixé par `"MAJ - "` pour se distinguer visuellement d'autres types de notifications pouvant partager le même topic ; **cas particulier Scrabble** : réutilise le topic existant des notifications d'issues fermées Bridge_Agent du projet Scrabble plutôt qu'un topic dédié séparé, car seul Alain est abonné aux deux flux — voir « Contenu de `config.json` » |
 | Format de version | `version.json` avec entier incrémental `build` (ex. `{"build": 47}`), comparaison `>` entre entiers — pas de semver ni de comparaison de chaînes brute (piège "9" > "10" lexicographique) |
 | Fichiers `version.json` | Deux fichiers distincts et indépendants : un dans le dépôt Actualise, un dans le dépôt de chaque application cible (URL construite depuis `config.json`) |
 | Distribution des binaires | Assets de GitHub Releases (URL stable `releases/download/<tag>/<fichier>`), pas commités dans l'historique ; **un seul asset par tag, sous forme d'archive zip** contenant tous les fichiers de la version (exécutable, données, DLL) et le manifeste ; **nom d'asset fixe `<préfixe>.zip`** (ex. `actualise.zip`, `scrabble.zip`), sans numéro de version dans le nom du fichier — chaque nouvelle Release re-uploade un asset de ce même nom ; **tag de Release au format `v<build>`** (ex. `v48`) ; diff binaire écarté (gain marginal, binaires PyInstaller recompilés quasi-intégralement à chaque changement) |

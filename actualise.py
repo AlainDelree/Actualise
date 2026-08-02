@@ -280,7 +280,7 @@ def tache_verification_arriere_plan() -> None:
 
             notifications.notifier_ntfy(
                 configuration["topic_ntfy"],
-                f"Mise à jour disponible pour {prefixe} (build {build_distant}) : "
+                f"MAJ - Mise à jour disponible pour {prefixe} (build {build_distant}) : "
                 "elle sera appliquée au prochain lancement.",
             )
     except Exception:
