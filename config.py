@@ -18,19 +18,34 @@ _NOM_FICHIER_CONFIG = "config.json"
 def chemin_config_portable() -> Path:
     """Retourne le chemin du dossier de configuration selon l'OS.
 
-    Windows : ``%SYSTEMDRIVE%\\Actualise\\`` — la variable
-    d'environnement ``SYSTEMDRIVE`` est préférée à un ``C:`` en dur pour
-    rester correct sur une installation où le disque système n'est pas
-    ``C:`` ; à défaut de cette variable (cas anormal), repli sur
-    ``C:`` (voir CONCEPTION.md, « Configuration portable »).
+    Windows, mode PyInstaller figé (``sys.frozen`` vrai) : dossier
+    contenant l'exécutable ``Actualise.exe`` lui-même, obtenu via
+    ``sys.executable`` — et non un chemin Windows fixe. Ceci permet
+    plusieurs installations indépendantes d'Actualise sur la même
+    machine (une par application cible) sans qu'une installation
+    n'écrase le ``config.json`` d'une autre (voir CONCEPTION.md,
+    « Configuration portable »).
 
-    Linux (et autres OS non Windows) : variable d'environnement
-    ``ACTUALISE_CONFIG_DIR`` si définie, sinon ``~/.config/actualise/``.
+    Windows, mode script non figé (développement/tests, ``sys.frozen``
+    absent ou faux) : repli sur l'ancien comportement,
+    ``%SYSTEMDRIVE%\\Actualise\\`` — la variable d'environnement
+    ``SYSTEMDRIVE`` est préférée à un ``C:`` en dur pour rester correct
+    sur une installation où le disque système n'est pas ``C:`` ; à
+    défaut de cette variable (cas anormal), repli sur ``C:``.
+
+    Linux (et autres OS non Windows) : comportement inchangé — variable
+    d'environnement ``ACTUALISE_CONFIG_DIR`` si définie, sinon
+    ``~/.config/actualise/`` ; la problématique de collision
+    multi-installations ne s'y pose pas de la même façon (voir
+    CONCEPTION.md, « Configuration portable »).
 
     Ne crée pas le dossier — résolution de chemin uniquement (voir
     ``sauvegarder_config`` pour la création).
     """
     if sys.platform == "win32":
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).parent
+
         lecteur_systeme = os.environ.get("SYSTEMDRIVE", "C:")
         return Path(f"{lecteur_systeme}/Actualise")
 

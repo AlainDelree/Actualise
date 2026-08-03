@@ -19,13 +19,41 @@ from config import chemin_config_portable, charger_config, sauvegarder_config
 class TestCheminConfigPortable(unittest.TestCase):
     @patch("config.os.environ", {"SYSTEMDRIVE": "D:"})
     @patch("config.sys.platform", "win32")
-    def test_windows_avec_systemdrive(self):
+    def test_windows_non_fige_avec_systemdrive(self):
+        # Mode script non figé (sys.frozen absent) : repli sur
+        # l'ancien comportement, utile pour les tests/développement.
         self.assertEqual(chemin_config_portable(), Path("D:/Actualise"))
 
     @patch("config.os.environ", {})
     @patch("config.sys.platform", "win32")
-    def test_windows_sans_systemdrive_repli_sur_c(self):
+    def test_windows_non_fige_sans_systemdrive_repli_sur_c(self):
         self.assertEqual(chemin_config_portable(), Path("C:/Actualise"))
+
+    @patch("config.sys.executable", "D:/Apps/Actualise_Scrabble/Actualise.exe")
+    @patch("config.sys.frozen", True, create=True)
+    @patch("config.sys.platform", "win32")
+    def test_windows_fige_pyinstaller_relatif_executable(self):
+        # Mode PyInstaller figé : dossier contenant Actualise.exe,
+        # résolu via sys.executable — pas un chemin fixe (voir
+        # CONCEPTION.md, « Configuration portable »).
+        self.assertEqual(
+            chemin_config_portable(),
+            Path("D:/Apps/Actualise_Scrabble"),
+        )
+
+    @patch(
+        "config.sys.executable",
+        "C:/Apps/Actualise_Rummikub/Actualise.exe",
+    )
+    @patch("config.sys.frozen", True, create=True)
+    @patch("config.sys.platform", "win32")
+    def test_windows_fige_pyinstaller_installations_independantes(self):
+        # Deux installations distinctes (une par application cible)
+        # résolvent vers des dossiers différents, sans collision.
+        self.assertEqual(
+            chemin_config_portable(),
+            Path("C:/Apps/Actualise_Rummikub"),
+        )
 
     @patch("config.os.environ", {"ACTUALISE_CONFIG_DIR": "/tmp/config-actualise-test"})
     @patch("config.sys.platform", "linux")
