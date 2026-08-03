@@ -9,10 +9,12 @@ infinie » pour le rôle de l'argument ``--child``.
 import argparse
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import zipfile
 from pathlib import Path
@@ -113,6 +115,28 @@ def _relancer_en_enfant() -> None:
     subprocess.Popen(commande)
 
 
+def _basculer_par_renommage(dossier_source: Path, destination: Path) -> None:
+    """Bascule le contenu de ``dossier_source`` (dossier temporaire
+    d'extraction) vers ``destination``, fichier par fichier, via
+    renommage (``os.replace``) plutôt qu'une réécriture en place.
+
+    Un ``.exe`` en cours d'exécution ne peut pas être réécrit en place
+    sous Windows (``PermissionError``), mais peut être renommé — voir
+    CONCEPTION.md, « Garde-fou anti-boucle infinie ». Toute ``OSError``
+    (ex. fichier encore verrouillé) remonte telle quelle à l'appelant,
+    qui décide de la marche à suivre (conservation du zip source pour
+    nouvelle tentative).
+    """
+    for chemin_source in dossier_source.rglob("*"):
+        chemin_relatif = chemin_source.relative_to(dossier_source)
+        chemin_destination = destination / chemin_relatif
+        if chemin_source.is_dir():
+            chemin_destination.mkdir(parents=True, exist_ok=True)
+        else:
+            chemin_destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(chemin_source, chemin_destination)
+
+
 def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
     """Applique, au lancement, les mises à jour mises en attente au
     cycle précédent (étape 4 de la séquence de démarrage).
@@ -179,8 +203,42 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
                 )
                 continue
 
-            mise_a_jour.extraire_zip(chemin_zip, repertoire_installation)
-            mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
+            if prefixe == "actualise":
+                # Actualise ne peut pas être réécrit en place pendant
+                # qu'il tourne (PermissionError sous Windows sur son
+                # propre .exe) : extraction dans un dossier temporaire
+                # distinct, puis bascule par renommage fichier à
+                # fichier — voir CONCEPTION.md, « Garde-fou
+                # anti-boucle infinie ». Le manifeste est appliqué
+                # après la bascule, directement sur
+                # repertoire_installation : il vise des fichiers
+                # obsolètes de l'installation déjà en place (pas
+                # nécessairement présents dans le zip fraîchement
+                # extrait), donc n'aurait aucun effet s'il était
+                # appliqué sur le dossier temporaire.
+                with tempfile.TemporaryDirectory(
+                    dir=repertoire_installation, prefix="maj_temp_"
+                ) as dossier_temp:
+                    mise_a_jour.extraire_zip(chemin_zip, Path(dossier_temp))
+                    try:
+                        _basculer_par_renommage(Path(dossier_temp), repertoire_installation)
+                    except OSError as erreur:
+                        _LOGGER.error(
+                            "Échec du renommage lors de la bascule d'auto-mise-à-jour "
+                            "d'Actualise (%s) : bascule ignorée, zip source conservé "
+                            "pour nouvelle tentative au prochain lancement.",
+                            erreur,
+                        )
+                        continue
+
+                mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
+            else:
+                # L'exécutable de l'application cible n'est pas en
+                # cours d'exécution au moment de la bascule (contexte
+                # différent d'Actualise lui-même) : l'extraction
+                # directe reste valide et sans risque.
+                mise_a_jour.extraire_zip(chemin_zip, repertoire_installation)
+                mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
 
             bloc_config["build_installe"] = build_zip
             config.sauvegarder_config(configuration)

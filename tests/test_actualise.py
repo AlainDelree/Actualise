@@ -116,13 +116,92 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 appliquer_mises_a_jour_en_attente(est_enfant=False)
 
-            mock_mise_a_jour.extraire_zip.assert_called_once_with(
-                chemin_zip, self.dossier_actualise
+            # L'extraction se fait dans un dossier temporaire distinct
+            # (sous repertoire_installation), jamais directement dans
+            # repertoire_installation lui-même — voir
+            # _basculer_par_renommage.
+            mock_mise_a_jour.extraire_zip.assert_called_once()
+            chemin_zip_appele, dossier_extraction = mock_mise_a_jour.extraire_zip.call_args[0]
+            self.assertEqual(chemin_zip_appele, chemin_zip)
+            self.assertEqual(dossier_extraction.parent, self.dossier_actualise)
+
+            mock_mise_a_jour.appliquer_manifeste.assert_called_once_with(
+                {"build": 11, "supprimer": []}, self.dossier_actualise
             )
             mock_relancer.assert_called_once()
 
         self.assertFalse(chemin_zip.exists())
         self.assertEqual(self.configuration["actualise"]["build_installe"], 11)
+
+    def test_bascule_actualise_via_dossier_temporaire_et_renommage(self):
+        # Test de bout en bout (sans mocker mise_a_jour) du mécanisme de
+        # bascule sécurisée : extraction dans un dossier temporaire puis
+        # renommage vers repertoire_installation, jamais d'écriture
+        # directe dans le dossier de l'exécutable en cours d'exécution.
+        chemin_zip = self.zone_attente / "actualise_11.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=11)
+
+        with patch("actualise._relancer_en_enfant") as mock_relancer:
+            with self.assertRaises(SystemExit):
+                appliquer_mises_a_jour_en_attente(est_enfant=False)
+
+            mock_relancer.assert_called_once()
+
+        fichier_bascule = self.dossier_actualise / "fichier.txt"
+        self.assertTrue(fichier_bascule.exists())
+        self.assertEqual(fichier_bascule.read_text(), "contenu")
+        self.assertFalse(chemin_zip.exists())
+        self.assertEqual(self.configuration["actualise"]["build_installe"], 11)
+
+        residus_temp = [
+            chemin
+            for chemin in self.dossier_actualise.iterdir()
+            if chemin.name.startswith("maj_temp_")
+        ]
+        self.assertEqual(residus_temp, [])
+
+    def test_echec_renommage_bascule_actualise_zip_conserve_aucune_exception(self):
+        chemin_zip = self.zone_attente / "actualise_11.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=11)
+
+        with patch(
+            "actualise._basculer_par_renommage",
+            side_effect=PermissionError("fichier encore verrouillé"),
+        ), patch("actualise._relancer_en_enfant") as mock_relancer, self.assertLogs(
+            "actualise", level="ERROR"
+        ) as journal:
+            appliquer_mises_a_jour_en_attente(est_enfant=False)
+
+            mock_relancer.assert_not_called()
+
+        self.assertTrue(chemin_zip.exists())
+        self.assertEqual(self.configuration["actualise"]["build_installe"], 10)
+        self.mock_config.sauvegarder_config.assert_not_called()
+        self.assertTrue(
+            any("renommage" in message.lower() for message in journal.output)
+        )
+
+    def test_application_cible_extrait_directement_sans_dossier_temporaire(self):
+        # Non-régression : contrairement à Actualise lui-même, l'exécutable
+        # de l'application cible n'est pas en cours d'exécution au moment
+        # de la bascule, donc l'extraction directe reste inchangée.
+        chemin_zip = self.zone_attente / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        with patch("actualise.mise_a_jour") as mock_mise_a_jour, patch(
+            "actualise._basculer_par_renommage"
+        ) as mock_basculer:
+            appliquer_mises_a_jour_en_attente(est_enfant=False)
+
+            mock_mise_a_jour.extraire_zip.assert_called_once_with(
+                chemin_zip, self.repertoire_cible
+            )
+            mock_mise_a_jour.appliquer_manifeste.assert_called_once_with(
+                {"build": 48, "supprimer": []}, self.repertoire_cible
+            )
+            mock_basculer.assert_not_called()
+
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 48)
 
     def test_aucun_zip_ne_fait_rien(self):
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:

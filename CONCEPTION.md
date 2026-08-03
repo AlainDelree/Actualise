@@ -412,13 +412,44 @@ sans nécessiter de compteur ni d'état persistant à gérer.
 - Le parent doit **attendre** la fin de l'enfant (`Popen.wait()` ou
   équivalent) plutôt que l'enfant ne tue le parent explicitement. Cela
   garde une séquence de terminaison simple et déterministe.
-- La nouvelle version d'Actualise doit être téléchargée/écrite sous un
-  **nom ou chemin temporaire distinct** de l'exécutable en cours
-  d'exécution, puis basculée par renommage (`rename` /
-  `MoveFileEx`) une fois l'ancien process terminé. Un `.exe` en cours
-  d'exécution ne peut pas être réécrit en place sous Windows (seulement
-  renommé) : écrire à côté puis renommer évite tout verrouillage de
-  fichier.
+
+**Bascule sécurisée par dossier temporaire + renommage (implémenté).**
+Un incident réel en production a confirmé le risque documenté
+ci-dessus : `appliquer_mises_a_jour_en_attente` tentait d'extraire
+directement le zip d'Actualise dans son propre dossier d'installation
+(`repertoire_installation`, celui de l'exécutable en cours
+d'exécution), ce qui échoue sous Windows avec `PermissionError [Errno
+13]` — un `.exe` en cours d'exécution ne peut pas être réécrit en
+place, seulement renommé. Ce point ne concernait que la mise à jour
+d'Actualise lui-même (`prefixe == "actualise"`) : l'application cible
+n'a pas son exécutable en cours d'exécution au moment de la bascule,
+donc son extraction directe reste inchangée et sans risque.
+
+Pour Actualise lui-même, la bascule suit désormais ce mécanisme :
+
+1. Extraction du zip dans un **dossier temporaire distinct**, créé sous
+   `repertoire_installation` (`<repertoire_installation>/maj_temp_*/`,
+   via `tempfile.TemporaryDirectory`) — jamais directement dans
+   `repertoire_installation`.
+2. **Bascule par renommage** fichier à fichier (`os.replace`) du
+   contenu de ce dossier temporaire vers `repertoire_installation` :
+   chaque fichier (y compris l'exécutable `Actualise.exe` lui-même)
+   est renommé par-dessus l'ancien, jamais réécrit en place pendant
+   qu'il tourne.
+3. Le manifeste (`manifest.json`) est appliqué **après** cette
+   bascule, directement sur `repertoire_installation` — et non sur le
+   dossier temporaire — car `manifest["supprimer"]` cible des fichiers
+   obsolètes de l'installation déjà en place, pas nécessairement
+   présents dans le zip fraîchement extrait ; l'appliquer au dossier
+   temporaire n'aurait donc aucun effet sur ces résidus.
+4. Le dossier temporaire est automatiquement nettoyé (context manager
+   `TemporaryDirectory`) une fois la bascule terminée (succès ou
+   échec).
+5. **Si le renommage échoue à nouveau** (ex. fichier encore verrouillé,
+   `OSError`) : erreur logguée clairement, zip source **conservé** en
+   zone d'attente pour permettre une nouvelle tentative au lancement
+   suivant, sans faire planter `main()` — traitement cohérent avec les
+   autres cas limites déjà en place (manifeste absent, zip corrompu).
 
 ## Intégration avec le setup.exe d'une application cible
 
