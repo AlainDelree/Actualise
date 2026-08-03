@@ -207,10 +207,44 @@ Détail des champs :
   comme tel, pas un changement de règle générale.
 
 `repertoire_installation` et `zone_attente` suivent la même logique de
-portabilité déjà actée pour `config.json` lui-même : chemin Windows par
-défaut (ex. `C:\Scrabble\`, `C:\Actualise\attente\`), équivalent
-portable pour Linux (ex. `~/.config/actualise/` ou variable
-d'environnement).
+portabilité déjà actée pour `config.json` lui-même : `zone_attente` est
+un sous-dossier du dossier de configuration d'Actualise, donc résolu
+relativement à celui-ci (ex. `C:\Actualise_Scrabble\attente\` si
+Actualise a été installé dans `C:\Actualise_Scrabble\` — voir
+« Configuration portable » ci-dessous), tandis que
+`repertoire_installation` reste un chemin propre à l'application cible
+(ex. `C:\Scrabble\`), équivalent portable pour Linux (ex.
+`~/.config/actualise/` ou variable d'environnement).
+
+## Configuration portable
+
+Le dossier de configuration d'Actualise (celui qui contient
+`config.json`, ainsi que la zone d'attente) n'est **pas** un chemin
+Windows fixe codé en dur (ex. `C:\Actualise\`). Il est résolu **au
+runtime, relativement à l'emplacement de l'exécutable `Actualise.exe`
+lui-même** : le dossier qui le contient, obtenu via `sys.executable` en
+mode PyInstaller figé (`sys.frozen`).
+
+**Raison de ce choix** : plusieurs applications cibles (ex. Scrabble et
+Rummikub) peuvent être installées indépendamment sur la même machine,
+chacune avec sa propre installation d'Actualise. Si le dossier de
+configuration était un chemin fixe unique, une seconde installation
+d'Actualise écraserait silencieusement le `config.json` de la première,
+lui faisant perdre la gestion de mise à jour de sa propre application
+cible (voir « Points de vigilance connus »). En résolvant ce dossier
+relativement à l'exécutable, chaque installation reste isolée dans son
+propre dossier, choisi indépendamment par le setup de chaque
+application cible, sans risque de collision.
+
+Sous Windows, le dossier concret dépend donc du setup de chaque
+application cible (ex. `C:\Actualise_Scrabble\` pour Scrabble,
+`C:\Actualise_Rummikub\` pour Rummikub — voir « Intégration avec le
+setup.exe d'une application cible »), et non plus systématiquement
+`C:\Actualise\`. Sous Linux, le comportement reste inchangé
+(`~/.config/actualise/` ou variable d'environnement) : l'exécutable
+Linux n'étant pas installé par un setup Windows par application, la
+problématique de collision multi-installations ne s'y pose pas de la
+même façon.
 
 ## Vérification réseau — timeout strict
 
@@ -397,24 +431,31 @@ applications cibles, Scrabble servant de premier exemple concret :
 
 1. **Installation dans un dossier séparé.** Actualise s'installe dans
    son propre dossier, indépendant du dossier d'installation de
-   l'application cible (ex. `C:\Actualise\`, cohérent avec la
-   « Configuration portable » déjà actée) — jamais à l'intérieur du
-   dossier de l'application cible. Ce découplage préserve la
-   réutilisabilité d'Actualise pour d'autres applications futures et
-   sépare le cycle de vie des deux installations : désinstaller
-   l'application cible n'entraîne pas nécessairement la désinstallation
-   d'Actualise, qui peut continuer à gérer d'autres programmes sur la
-   même machine.
+   l'application cible — jamais à l'intérieur du dossier de
+   l'application cible. Ce découplage préserve la réutilisabilité
+   d'Actualise pour d'autres applications futures et sépare le cycle de
+   vie des deux installations : désinstaller l'application cible
+   n'entraîne pas nécessairement la désinstallation d'Actualise, qui
+   peut continuer à gérer d'autres programmes sur la même machine.
+
+   Le nom exact de ce dossier n'est **plus fixe** (ce n'est plus
+   systématiquement `C:\Actualise\`) : il est choisi par chaque setup
+   d'application cible, avec une **convention suggérée**
+   `C:\Actualise_<NomApplication>\` (ex. `C:\Actualise_Scrabble\`,
+   `C:\Actualise_Rummikub\`) pour éviter toute collision entre
+   applications cibles différentes installées sur la même machine (voir
+   « Configuration portable »).
 
    Ce « propre dossier » d'Actualise **n'est pas distinct** de son
    dossier de configuration : le répertoire d'installation d'Actualise
-   lui-même est exactement `chemin_config_portable()` (ex.
-   `C:\Actualise\` sous Windows, voir « Configuration portable »).
-   `Actualise.exe`, son `config.json` et sa zone d'attente cohabitent
-   dans ce même dossier — il n'existe pas de chemin d'installation
-   séparé pour l'exécutable d'Actualise, contrairement à l'application
-   cible qui a son propre `repertoire_installation` distinct dans
-   `config.json`.
+   lui-même est exactement le dossier résolu par « Configuration
+   portable » — c'est-à-dire le dossier contenant `Actualise.exe`
+   lui-même, résolu relativement à l'exécutable via `sys.executable`,
+   pas un chemin codé en dur. `Actualise.exe`, son `config.json` et sa
+   zone d'attente cohabitent dans ce même dossier — il n'existe pas de
+   chemin d'installation séparé pour l'exécutable d'Actualise,
+   contrairement à l'application cible qui a son propre
+   `repertoire_installation` distinct dans `config.json`.
 2. **Raccourcis modifiés.** Les raccourcis Bureau et menu Démarrer créés
    par le setup pointent vers `Actualise.exe` (dans son dossier séparé),
    jamais directement vers l'exécutable de l'application cible —
@@ -464,9 +505,9 @@ applications cibles, Scrabble servant de premier exemple concret :
 | Vérification SHA-256 du zip | `version.json` porte un champ `sha256` du zip complet publié ; après téléchargement, avant mise en zone d'attente, comparaison du SHA-256 calculé sur le fichier reçu ; non-correspondance → téléchargement rejeté, aucune zone d'attente mise à jour, nouvelle tentative au cycle suivant (même repli que pour un échec réseau) ; liste de fichiers attendus post-extraction écartée (redondante une fois le zip validé, une extraction incomplète relevant d'un problème d'environnement local détectable par vérification d'erreur d'extraction) |
 | Bootstrap séparé | Écarté pour l'instant — Actualise reste un exécutable unique qui se met à jour lui-même, avec le garde-fou par marqueur ci-dessus |
 | Garde-fou anti-boucle | Marqueur explicite transmis parent → enfant (env `ACTUALISE_CHILD=1` ou arg `--child`), déclenché uniquement lors de la bascule d'une mise à jour déjà téléchargée — voir section dédiée ci-dessus |
-| Configuration portable | `C:\Actualise\` sous Windows, équivalent portable sous Linux (ex. `~/.config/actualise/` ou variable d'environnement) pour préserver la réutilisabilité Linux |
+| Configuration portable | Dossier résolu **relativement à l'emplacement de l'exécutable `Actualise.exe`** (via `sys.executable` en mode PyInstaller figé) — pas un chemin Windows fixe codé en dur — pour permettre plusieurs installations indépendantes d'Actualise sur la même machine (une par application cible) sans qu'une installation n'écrase le `config.json` d'une autre ; équivalent portable sous Linux inchangé (ex. `~/.config/actualise/` ou variable d'environnement) |
 | Contenu de `config.json` | Deux blocs `actualise`/`application_cible` portant chacun `build_installe` et `depot_github` ; `application_cible` porte en plus `nom`, `repertoire_installation`, `executable`, et `icone` (optionnel, chemin `.ico` documenté pour le setup cible — non lu au runtime par Actualise) ; `zone_attente` (chemin de la zone d'attente locale) et `topic_ntfy` au niveau racine — voir « Contenu de `config.json` » |
-| Intégration au setup.exe cible | Actualise s'installe dans un dossier séparé de l'application cible (jamais dans son dossier) ; **ce dossier séparé est exactement `chemin_config_portable()`** — pas de chemin d'installation distinct du dossier de configuration, `Actualise.exe`/`config.json`/zone d'attente cohabitent ; les raccourcis créés par le setup sont redirigés vers `Actualise.exe` ; le setup dépose `Actualise.exe` et génère un `config.json` initial cohérent avec les versions réellement embarquées ; **icône du raccourci** : le setup de l'application cible déploie son propre fichier `.ico` et l'utilise à la fois pour `IconFilename` du raccourci (qui pointe vers `Actualise.exe` mais affiche l'icône de l'application cible) et pour le champ `icone` de `config.json` — même chemin dans les deux cas — voir « Intégration avec le setup.exe d'une application cible » |
+| Intégration au setup.exe cible | Actualise s'installe dans un dossier séparé de l'application cible (jamais dans son dossier) ; **ce dossier séparé est exactement le dossier de configuration résolu relativement à l'exécutable** (voir « Configuration portable ») — pas de chemin d'installation distinct du dossier de configuration, `Actualise.exe`/`config.json`/zone d'attente cohabitent ; **le nom de ce dossier n'est plus fixe** (`C:\Actualise\`) mais choisi par chaque setup, convention suggérée `C:\Actualise_<NomApplication>\` (ex. `C:\Actualise_Scrabble\`, `C:\Actualise_Rummikub\`) pour éviter toute collision entre applications cibles différentes ; les raccourcis créés par le setup sont redirigés vers `Actualise.exe` ; le setup dépose `Actualise.exe` et génère un `config.json` initial cohérent avec les versions réellement embarquées ; **icône du raccourci** : le setup de l'application cible déploie son propre fichier `.ico` et l'utilise à la fois pour `IconFilename` du raccourci (qui pointe vers `Actualise.exe` mais affiche l'icône de l'application cible) et pour le champ `icone` de `config.json` — même chemin dans les deux cas — voir « Intégration avec le setup.exe d'une application cible » |
 | Cycle de vie d'Actualise | Lancement non bloquant de l'application cible (`Popen` sans `wait()`) : cycles de vie indépendants dès le lancement ; Actualise attend uniquement la fin de sa propre tâche de fond (vérification, téléchargement, validation SHA-256, notification ntfy), puis se termine à son tour — que l'application cible tourne encore ou non ; Actualise n'est pas un processus permanent |
 | Nommage versionné des zips en zone d'attente | `<préfixe>_<build>.zip` (ex. `actualise_48.zip`, `scrabble_112.zip`) — comparaison directe avec `build_installe` sans ouvrir le zip ; au démarrage, résidu avec `build` ≤ `build_installe` correspondant supprimé sans être appliqué (nettoyage automatique, garde-fou contre un zip bloqué indéfiniment en zone d'attente) ; **si plusieurs zips du même préfixe coexistent**, seul celui au build le plus élevé est considéré, les autres supprimés sans être appliqués (même logique que pour un résidu obsolète) — voir « Nommage versionné des zips en zone d'attente » |
 
@@ -479,3 +520,14 @@ applications cibles, Scrabble servant de premier exemple concret :
   de mise à jour urgente à la minute près), mais documenté ici pour
   mémoire — une éventuelle parade (paramètre anti-cache, endpoint API
   GitHub, ou tag Release) reste ouverte si le délai devenait gênant.
+- **Incident à l'origine de la « Configuration portable » relative à
+  l'exécutable** : l'installation simultanée de plusieurs applications
+  cibles sur la même machine (ex. Scrabble et Rummikub) a révélé qu'un
+  chemin de configuration fixe (`C:\Actualise\`) faisait écraser
+  silencieusement le `config.json` d'une première installation par la
+  seconde, cette dernière lui faisant perdre la gestion de mise à jour
+  de sa propre application cible — sans erreur visible, jusqu'à
+  constater qu'une des deux applications ne se mettait plus à jour.
+  Corrigé en résolvant le dossier de configuration relativement à
+  l'emplacement de l'exécutable `Actualise.exe` plutôt qu'un chemin
+  codé en dur (voir « Configuration portable »).
