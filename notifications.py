@@ -9,7 +9,7 @@ import logging
 
 import requests
 
-from version_check import TIMEOUT_RESEAU_SECONDES
+from version_check import TIMEOUT_VERSION_SECONDES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def notifier_ntfy(topic: str, message: str) -> None:
     url = _GABARIT_URL_NTFY.format(topic=topic)
 
     try:
-        reponse = requests.post(url, data=message.encode("utf-8"), timeout=TIMEOUT_RESEAU_SECONDES)
+        reponse = requests.post(url, data=message.encode("utf-8"), timeout=TIMEOUT_VERSION_SECONDES)
         reponse.raise_for_status()
     except requests.RequestException as erreur:
-        _LOGGER.debug("Échec d'envoi de notification ntfy sur %s : %s", topic, erreur)
+        _LOGGER.warning("Échec d'envoi de notification ntfy sur %s : %s", topic, erreur)

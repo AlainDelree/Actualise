@@ -16,7 +16,7 @@ from typing import Any
 
 import requests
 
-from version_check import TIMEOUT_RESEAU_SECONDES
+from version_check import TIMEOUT_DOWNLOAD_SECONDES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,18 +39,18 @@ def telecharger_zip(url: str, sha256_attendu: str) -> Path | None:
     chemin_temp = Path(fichier_temp.name)
 
     try:
-        reponse = requests.get(url, timeout=TIMEOUT_RESEAU_SECONDES, stream=True)
+        reponse = requests.get(url, timeout=TIMEOUT_DOWNLOAD_SECONDES, stream=True)
         reponse.raise_for_status()
         with fichier_temp:
             for bloc in reponse.iter_content(chunk_size=_TAILLE_BLOC_OCTETS):
                 fichier_temp.write(bloc)
     except requests.RequestException as erreur:
-        _LOGGER.debug("Échec de téléchargement depuis %s : %s", url, erreur)
+        _LOGGER.warning("Échec de téléchargement depuis %s : %s", url, erreur)
         chemin_temp.unlink(missing_ok=True)
         return None
 
     if not verifier_sha256(chemin_temp, sha256_attendu):
-        _LOGGER.debug("SHA-256 invalide pour le zip téléchargé depuis %s", url)
+        _LOGGER.warning("SHA-256 invalide pour le zip téléchargé depuis %s", url)
         chemin_temp.unlink(missing_ok=True)
         return None
 
@@ -71,7 +71,7 @@ def verifier_sha256(chemin_fichier: Path, hash_attendu: str) -> bool:
             for bloc in iter(lambda: f.read(_TAILLE_BLOC_OCTETS), b""):
                 hachage.update(bloc)
     except OSError as erreur:
-        _LOGGER.debug("Impossible de lire %s pour vérification SHA-256 : %s", chemin_fichier, erreur)
+        _LOGGER.warning("Impossible de lire %s pour vérification SHA-256 : %s", chemin_fichier, erreur)
         return False
 
     return hachage.hexdigest() == hash_attendu

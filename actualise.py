@@ -307,6 +307,8 @@ def tache_verification_arriere_plan() -> None:
     planter le programme.
     """
     try:
+        _LOGGER.info("Démarrage de la vérification des mises à jour en arrière-plan.")
+
         configuration = config.charger_config()
         zone_attente = Path(configuration["zone_attente"])
         zone_attente.mkdir(parents=True, exist_ok=True)
