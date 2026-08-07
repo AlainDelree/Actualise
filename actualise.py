@@ -289,11 +289,11 @@ def _url_asset_release(depot_github: str, build: int, prefixe: str) -> str:
     Voir CONCEPTION.md, « Distribution des binaires — GitHub Releases » :
     un seul asset zip par tag, le tag étant ``v<build>`` (ex. ``v48``).
     Convention retenue ici pour le nom de fichier de l'asset publié :
-    ``<prefixe>.zip`` (ex. ``actualise.zip``, ``scrabble.zip``) — à
-    documenter/adapter si un autre nommage d'asset est publié côté
-    Release.
+    ``<prefixe>-v<build>.zip`` (ex. ``actualise-v48.zip``,
+    ``scrabble-v4.zip``) — à documenter/adapter si un autre nommage
+    d'asset est publié côté Release.
     """
-    return _GABARIT_URL_RELEASE.format(depot=depot_github, build=build, fichier=f"{prefixe}.zip")
+    return _GABARIT_URL_RELEASE.format(depot=depot_github, build=build, fichier=f"{prefixe}-v{build}.zip")
 
 
 def tache_verification_arriere_plan() -> None:
