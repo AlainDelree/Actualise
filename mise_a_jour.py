@@ -46,6 +46,7 @@ def telecharger_zip(url: str, sha256_attendu: str) -> Path | None:
                 fichier_temp.write(bloc)
     except requests.RequestException as erreur:
         _LOGGER.warning("Échec de téléchargement depuis %s : %s", url, erreur)
+        fichier_temp.close()
         chemin_temp.unlink(missing_ok=True)
         return None
 
