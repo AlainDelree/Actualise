@@ -124,6 +124,7 @@ def _relancer_en_enfant(nom_app: str) -> None:
 
 _NOM_EXECUTABLE = "Actualise.exe"
 _NOM_DOSSIER_INTERNAL = "_internal"
+_NOM_FLAG_MAJ_ACTUALISE = "actualise_update.flag"
 
 
 def _basculer_par_renommage(dossier_source: Path, destination: Path) -> None:
@@ -238,6 +239,20 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                 continue
 
             chemin_zip, build_zip = resultat
+
+            if prefixe == "actualise" and (
+                Path(configuration["application_cible"]["repertoire_installation"])
+                / _NOM_FLAG_MAJ_ACTUALISE
+            ).exists():
+                # Le flag est présent : ActualiseUI.exe attend encore la
+                # validation de l'utilisateur (ou le bat est déjà en
+                # cours d'exécution) — ne pas tenter la bascule par
+                # renommage en parallèle, laisser le bat gérer seul.
+                _LOGGER.info(
+                    "Mise à jour Actualise en attente de validation utilisateur "
+                    "(flag présent)."
+                )
+                continue
 
             if build_zip <= bloc_config["build_installe"]:
                 # Résidu obsolète (déjà appliqué à un cycle précédent, ou
@@ -360,6 +375,61 @@ def lancer_application_cible(nom_app: str) -> None:
     subprocess.Popen([str(chemin_executable)])
 
 
+_GABARIT_UPDATER_BAT = """@echo off
+timeout /t 3 /nobreak > nul
+cd /d "{dossier_actualise}"
+if exist "_internal.old" rmdir /s /q "_internal.old"
+if exist "Actualise.exe.old" del /f "Actualise.exe.old"
+powershell -NoProfile -Command "Expand-Archive -LiteralPath '{chemin_zip}' -DestinationPath '{dossier_actualise}\\maj_bat' -Force"
+ren "_internal" "_internal.old"
+move "maj_bat\\_internal" "_internal"
+ren "Actualise.exe" "Actualise.exe.old"
+move "maj_bat\\Actualise.exe" "Actualise.exe"
+rmdir /s /q "maj_bat"
+del "{chemin_zip}"
+del "{chemin_flag}"
+if "%~1"=="--relancer" start "" "%~2"
+"""
+
+
+def _generer_updater_bat(chemin_zip: Path, dossier_actualise: Path, chemin_flag: Path) -> Path:
+    """Génère ``updater.bat`` dans ``dossier_actualise``, tous les
+    chemins étant hardcodés au moment de la génération.
+
+    Actualise ne peut pas se remplacer lui-même pendant qu'il tourne
+    (verrous Windows sur ``_internal``/``Actualise.exe``, voir
+    ``_basculer_par_renommage``) : ce bat, lancé par ActualiseUI.exe une
+    fois Actualise fermé, effectue la bascule à sa place. Retourne le
+    chemin du bat généré.
+    """
+    chemin_bat = dossier_actualise / "updater.bat"
+    chemin_bat.write_text(
+        _GABARIT_UPDATER_BAT.format(
+            dossier_actualise=dossier_actualise,
+            chemin_zip=chemin_zip,
+            chemin_flag=chemin_flag,
+        ),
+        encoding="utf-8",
+    )
+    return chemin_bat
+
+
+def _ecrire_flag_maj(repertoire_app_cible: Path, chemin_bat: Path, dossier_actualise: Path) -> None:
+    """Écrit ``actualise_update.flag`` dans le dossier d'installation de
+    l'application cible.
+
+    Détecté par l'application cible à son démarrage pour lancer
+    ActualiseUI.exe, qui présente à l'utilisateur le choix d'appliquer
+    la mise à jour d'Actualise (voir CONCEPTION.md).
+    """
+    chemin_flag = repertoire_app_cible / _NOM_FLAG_MAJ_ACTUALISE
+    contenu = {
+        "actualise_ui": str(dossier_actualise / "ActualiseUI.exe"),
+        "bat": str(chemin_bat),
+    }
+    chemin_flag.write_text(json.dumps(contenu, indent=4), encoding="utf-8")
+
+
 def _url_asset_release(depot_github: str, build: int, prefixe: str) -> str:
     """Construit l'URL de l'asset zip de Release GitHub pour ``build``.
 
@@ -414,6 +484,30 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
 
             chemin_zone_attente = zone_attente / f"{prefixe}_{build_distant}.zip"
             shutil.move(str(chemin_telecharge), str(chemin_zone_attente))
+
+            if prefixe == "actualise":
+                # Actualise ne peut pas se remplacer lui-même pendant
+                # qu'il tourne : le bat + le flag sont générés dès
+                # maintenant, pour que l'application cible les détecte
+                # à son prochain démarrage et laisse l'utilisateur
+                # choisir via ActualiseUI.exe (voir CONCEPTION.md).
+                try:
+                    chemin_flag = (
+                        Path(configuration["application_cible"]["repertoire_installation"])
+                        / _NOM_FLAG_MAJ_ACTUALISE
+                    )
+                    chemin_bat = _generer_updater_bat(
+                        chemin_zone_attente, config.chemin_config_portable(), chemin_flag
+                    )
+                    _ecrire_flag_maj(
+                        Path(configuration["application_cible"]["repertoire_installation"]),
+                        chemin_bat,
+                        config.chemin_config_portable(),
+                    )
+                except OSError:
+                    _LOGGER.exception(
+                        "Échec de la génération du bat/flag de mise à jour Actualise."
+                    )
 
             notifications.notifier_ntfy(
                 configuration["topic_ntfy"],
