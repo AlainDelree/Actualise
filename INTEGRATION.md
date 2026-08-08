@@ -10,6 +10,7 @@ Actualise est une instance unique partagée entre toutes les applications cibles
 
 ## 3. Checklist d'intégration pour un nouveau projet cible
 
+- **Droits d'installation** : le setup doit utiliser `PrivilegesRequired=admin` (jamais `lowest`) pour pouvoir créer et écrire dans `C:\Actualise\` (racine du disque système, inaccessible en écriture aux utilisateurs standards). Avec `admin`, les constantes InnoSetup `{autopf}`, `{autodesktop}` et `{autoprograms}` résolvent vers les emplacements "tous les utilisateurs" (C:\Program Files\, Bureau commun, menu Démarrer commun). Incident réel : avec `lowest`, Actualise n'est pas déployé, le raccourci pointe vers l'ancienne installation et l'application ne démarre pas.
 - **Dossier Actualise partagé** : `C:\Actualise\` — jamais un dossier par app.
 - **Deux fichiers de config** à créer par le setup InnoSetup :
   - `C:\Actualise\config_actualise.json` — uniquement s'il n'existe pas déjà (ne pas écraser si une autre app l'a déjà créé).
@@ -55,7 +56,7 @@ Actualise est une instance unique partagée entre toutes les applications cibles
 - Asset zip nommé `<prefixe>-v<build>.zip` (ex. `scrabble-v8.zip`) — Actualise construit l'URL dynamiquement à partir du numéro de build.
 - Tag GitHub : `v<build>` (ex. `v8`).
 - Le zip doit être à plat : exécutable et `_internal\` directement à la racine, sans sous-dossier intermédiaire.
-- Inclure un `manifest.json` à la racine : `{"supprimer": []}` (liste des fichiers à nettoyer lors de l'installation, vide par défaut).
+- Inclure un `manifest.json` à la racine : `{"supprimer": []}`.
 - L'app cible doit publier son propre `version.json` à la racine du dépôt : `{"build": N, "sha256": "..."}`.
 
 ## 6. Intégration dans le code de l'application cible
