@@ -35,7 +35,7 @@ class TestAppliquerMisesAJourEnAttenteEnfant(unittest.TestCase):
     @patch("actualise.mise_a_jour")
     @patch("actualise.config")
     def test_est_enfant_ne_fait_rien(self, mock_config, mock_mise_a_jour):
-        appliquer_mises_a_jour_en_attente(est_enfant=True)
+        appliquer_mises_a_jour_en_attente(est_enfant=True, nom_app="scrabble")
 
         mock_config.charger_config.assert_not_called()
         mock_mise_a_jour.extraire_zip.assert_not_called()
@@ -79,7 +79,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         _creer_zip_avec_manifest(chemin_zip, build=48)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_mise_a_jour.extraire_zip.assert_called_once_with(
                 chemin_zip, self.repertoire_cible
@@ -90,21 +90,25 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
 
         self.assertFalse(chemin_zip.exists())
         self.assertEqual(self.configuration["application_cible"]["build_installe"], 48)
-        self.mock_config.sauvegarder_config.assert_called_once_with(self.configuration)
+        self.mock_config.sauvegarder_config_app.assert_called_once_with(
+            "scrabble", self.configuration["application_cible"]
+        )
+        self.mock_config.sauvegarder_config_actualise.assert_not_called()
 
     def test_zip_obsolete_supprime_sans_bascule(self):
         chemin_zip = self.zone_attente / "scrabble_40.zip"
         _creer_zip_avec_manifest(chemin_zip, build=40)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_mise_a_jour.extraire_zip.assert_not_called()
             mock_mise_a_jour.appliquer_manifeste.assert_not_called()
 
         self.assertFalse(chemin_zip.exists())
         self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
-        self.mock_config.sauvegarder_config.assert_not_called()
+        self.mock_config.sauvegarder_config_actualise.assert_not_called()
+        self.mock_config.sauvegarder_config_app.assert_not_called()
 
     def test_zip_actualise_valide_relance_enfant_et_termine(self):
         chemin_zip = self.zone_attente / "actualise_11.zip"
@@ -114,7 +118,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
             "actualise._relancer_en_enfant"
         ) as mock_relancer:
             with self.assertRaises(SystemExit):
-                appliquer_mises_a_jour_en_attente(est_enfant=False)
+                appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             # L'extraction se fait dans un dossier temporaire distinct
             # (sous repertoire_installation), jamais directement dans
@@ -128,7 +132,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
             mock_mise_a_jour.appliquer_manifeste.assert_called_once_with(
                 {"build": 11, "supprimer": []}, self.dossier_actualise
             )
-            mock_relancer.assert_called_once()
+            mock_relancer.assert_called_once_with("scrabble")
 
         self.assertFalse(chemin_zip.exists())
         self.assertEqual(self.configuration["actualise"]["build_installe"], 11)
@@ -143,9 +147,9 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
 
         with patch("actualise._relancer_en_enfant") as mock_relancer:
             with self.assertRaises(SystemExit):
-                appliquer_mises_a_jour_en_attente(est_enfant=False)
+                appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
-            mock_relancer.assert_called_once()
+            mock_relancer.assert_called_once_with("scrabble")
 
         fichier_bascule = self.dossier_actualise / "fichier.txt"
         self.assertTrue(fichier_bascule.exists())
@@ -170,13 +174,14 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         ), patch("actualise._relancer_en_enfant") as mock_relancer, self.assertLogs(
             "actualise", level="ERROR"
         ) as journal:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_relancer.assert_not_called()
 
         self.assertTrue(chemin_zip.exists())
         self.assertEqual(self.configuration["actualise"]["build_installe"], 10)
-        self.mock_config.sauvegarder_config.assert_not_called()
+        self.mock_config.sauvegarder_config_actualise.assert_not_called()
+        self.mock_config.sauvegarder_config_app.assert_not_called()
         self.assertTrue(
             any("renommage" in message.lower() for message in journal.output)
         )
@@ -191,7 +196,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         with patch("actualise.mise_a_jour") as mock_mise_a_jour, patch(
             "actualise._basculer_par_renommage"
         ) as mock_basculer:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_mise_a_jour.extraire_zip.assert_called_once_with(
                 chemin_zip, self.repertoire_cible
@@ -205,12 +210,13 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
 
     def test_aucun_zip_ne_fait_rien(self):
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_mise_a_jour.extraire_zip.assert_not_called()
             mock_mise_a_jour.appliquer_manifeste.assert_not_called()
 
-        self.mock_config.sauvegarder_config.assert_not_called()
+        self.mock_config.sauvegarder_config_actualise.assert_not_called()
+        self.mock_config.sauvegarder_config_app.assert_not_called()
 
     def test_plusieurs_zips_meme_prefixe_le_plus_eleve_applique_lautre_supprime(self):
         chemin_zip_bas = self.zone_attente / "scrabble_48.zip"
@@ -219,7 +225,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         _creer_zip_avec_manifest(chemin_zip_haut, build=49)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_mise_a_jour.extraire_zip.assert_called_once_with(
                 chemin_zip_haut, self.repertoire_cible
@@ -235,39 +241,42 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
             archive.writestr("fichier.txt", "contenu")
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_mise_a_jour.extraire_zip.assert_not_called()
             mock_mise_a_jour.appliquer_manifeste.assert_not_called()
 
         self.assertTrue(chemin_zip.exists())
         self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
-        self.mock_config.sauvegarder_config.assert_not_called()
+        self.mock_config.sauvegarder_config_actualise.assert_not_called()
+        self.mock_config.sauvegarder_config_app.assert_not_called()
 
     def test_zip_corrompu_zip_conserve_aucune_bascule(self):
         chemin_zip = self.zone_attente / "scrabble_48.zip"
         chemin_zip.write_text("ceci n'est pas un zip")
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_mise_a_jour.extraire_zip.assert_not_called()
             mock_mise_a_jour.appliquer_manifeste.assert_not_called()
 
         self.assertTrue(chemin_zip.exists())
         self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
-        self.mock_config.sauvegarder_config.assert_not_called()
+        self.mock_config.sauvegarder_config_actualise.assert_not_called()
+        self.mock_config.sauvegarder_config_app.assert_not_called()
 
     def test_zone_attente_inexistante_aucune_exception(self):
         self.zone_attente.rmdir()
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
-            appliquer_mises_a_jour_en_attente(est_enfant=False)
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
             mock_mise_a_jour.extraire_zip.assert_not_called()
             mock_mise_a_jour.appliquer_manifeste.assert_not_called()
 
-        self.mock_config.sauvegarder_config.assert_not_called()
+        self.mock_config.sauvegarder_config_actualise.assert_not_called()
+        self.mock_config.sauvegarder_config_app.assert_not_called()
 
     def test_config_incomplete_keyerror_levee_avec_log_derreur(self):
         del self.configuration["application_cible"]
@@ -276,9 +285,9 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
             "actualise", level="ERROR"
         ) as journal:
             with self.assertRaises(KeyError):
-                appliquer_mises_a_jour_en_attente(est_enfant=False)
+                appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
-        self.assertTrue(any("config.json" in message for message in journal.output))
+        self.assertTrue(any("config_actualise.json" in message for message in journal.output))
 
 
 class TestConfigurerLogging(unittest.TestCase):
@@ -335,8 +344,9 @@ class TestLancerApplicationCible(unittest.TestCase):
         mock_processus = MagicMock()
         mock_popen.return_value = mock_processus
 
-        lancer_application_cible()
+        lancer_application_cible("scrabble")
 
+        mock_config.charger_config.assert_called_once_with("scrabble")
         mock_popen.assert_called_once_with([str(Path("/opt/scrabble") / "Scrabble.exe")])
         mock_processus.wait.assert_not_called()
 
@@ -383,7 +393,7 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
                 chemin_temp_scrabble,
             ]
 
-            tache_verification_arriere_plan()
+            tache_verification_arriere_plan("scrabble")
 
             self.assertEqual(mock_mise_a_jour.telecharger_zip.call_count, 2)
             mock_notifications.notifier_ntfy.assert_has_calls(
@@ -408,7 +418,7 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
         ) as mock_mise_a_jour, patch("actualise.notifications") as mock_notifications:
             mock_version_check.verifier_version.return_value = None
 
-            tache_verification_arriere_plan()
+            tache_verification_arriere_plan("scrabble")
 
             mock_mise_a_jour.telecharger_zip.assert_not_called()
             mock_notifications.notifier_ntfy.assert_not_called()
@@ -419,7 +429,7 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
         with patch("actualise.config") as mock_config:
             mock_config.charger_config.side_effect = RuntimeError("boom")
 
-            tache_verification_arriere_plan()
+            tache_verification_arriere_plan("scrabble")
 
 
 class TestMain(unittest.TestCase):
@@ -444,7 +454,7 @@ class TestMain(unittest.TestCase):
             "actualise.lancer_application_cible", side_effect=RuntimeError("boum fatal")
         ), self.assertLogs("actualise", level="ERROR") as journal:
             with self.assertRaises(RuntimeError):
-                main([])
+                main(["--config", "scrabble"])
 
         self.assertTrue(any("erreur fatale" in message for message in journal.output))
 
@@ -454,7 +464,7 @@ class TestMain(unittest.TestCase):
         ), patch("actualise.lancer_application_cible") as mock_lancer:
             with self.assertNoLogs("actualise", level="ERROR"):
                 with self.assertRaises(SystemExit):
-                    main([])
+                    main(["--config", "scrabble"])
 
             mock_lancer.assert_not_called()
 

@@ -1,5 +1,5 @@
-"""Lecture/écriture de config.json et résolution du chemin de
-configuration portable (Windows/Linux).
+"""Lecture/écriture de config_actualise.json / config_<app>.json et
+résolution du chemin de configuration portable (Windows/Linux).
 
 Voir CONCEPTION.md, sections « Contenu de config.json » et
 « Configuration portable ».
@@ -12,7 +12,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-_NOM_FICHIER_CONFIG = "config.json"
+_NOM_FICHIER_ACTUALISE = "config_actualise.json"
+_GABARIT_NOM_FICHIER_APP = "config_{nom}.json"
 
 
 def chemin_config_portable() -> Path:
@@ -40,7 +41,8 @@ def chemin_config_portable() -> Path:
     CONCEPTION.md, « Configuration portable »).
 
     Ne crée pas le dossier — résolution de chemin uniquement (voir
-    ``sauvegarder_config`` pour la création).
+    ``sauvegarder_config_actualise``/``sauvegarder_config_app`` pour la
+    création).
     """
     if sys.platform == "win32":
         if getattr(sys, "frozen", False):
@@ -56,12 +58,57 @@ def chemin_config_portable() -> Path:
     return Path.home() / ".config" / "actualise"
 
 
-def charger_config() -> dict[str, Any]:
-    """Charge et retourne le contenu de config.json.
+def _nom_fichier_app(nom_app: str) -> str:
+    return _GABARIT_NOM_FICHIER_APP.format(nom=nom_app)
+
+
+def _charger_json(chemin_fichier: Path) -> dict[str, Any]:
+    with open(chemin_fichier, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _ecrire_json_atomique(chemin_fichier: Path, contenu: dict[str, Any]) -> None:
+    """Écrit ``contenu`` en JSON dans ``chemin_fichier``, atomiquement.
+
+    Crée le dossier de configuration si nécessaire. Écriture atomique :
+    le contenu est d'abord écrit dans un fichier temporaire du même
+    dossier, puis basculé via ``os.replace`` — un fichier temporaire
+    partiellement écrit (interruption en cours de route) ne peut donc
+    jamais remplacer un fichier de configuration déjà valide.
+    """
+    dossier_config = chemin_fichier.parent
+    dossier_config.mkdir(parents=True, exist_ok=True)
+
+    fichier_temp = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=dossier_config,
+        prefix=f".{chemin_fichier.name}.",
+        suffix=".tmp",
+        delete=False,
+    )
+    chemin_temp = Path(fichier_temp.name)
+    try:
+        with fichier_temp:
+            json.dump(contenu, fichier_temp, indent=2, ensure_ascii=False)
+        os.replace(chemin_temp, chemin_fichier)
+    except BaseException:
+        chemin_temp.unlink(missing_ok=True)
+        raise
+
+
+def charger_config(nom_app: str) -> dict[str, Any]:
+    """Charge et fusionne config_actualise.json et config_<nom_app>.json.
 
     Voir CONCEPTION.md, section « Contenu de config.json », pour le
-    format attendu (blocs ``actualise`` / ``application_cible``,
-    ``zone_attente``, ``topic_ntfy``).
+    format attendu. Retourne un dict compatible avec la structure
+    utilisée par ``actualise.py`` :
+
+    - ``actualise`` : contenu de config_actualise.json sans zone_attente
+    - ``application_cible`` : contenu entier de config_<nom_app>.json
+    - ``zone_attente`` : depuis config_actualise.json
+    - ``topic_ntfy`` : copié depuis ``application_cible``, pour
+      compatibilité avec l'appelant actuel
 
     L'absence de configuration valide est bloquante pour Actualise (à
     la différence de ``verifier_version``, pas de repli silencieux
@@ -70,39 +117,38 @@ def charger_config() -> dict[str, Any]:
     se propager telles quelles à l'appelant, plutôt que d'introduire
     une exception dédiée.
     """
-    chemin_fichier = chemin_config_portable() / _NOM_FICHIER_CONFIG
-    with open(chemin_fichier, encoding="utf-8") as f:
-        return json.load(f)
+    dossier_config = chemin_config_portable()
+
+    config_actualise = _charger_json(dossier_config / _NOM_FICHIER_ACTUALISE)
+    config_app = _charger_json(dossier_config / _nom_fichier_app(nom_app))
+
+    zone_attente = config_actualise["zone_attente"]
+    bloc_actualise = {cle: valeur for cle, valeur in config_actualise.items() if cle != "zone_attente"}
+
+    return {
+        "actualise": bloc_actualise,
+        "application_cible": config_app,
+        "zone_attente": zone_attente,
+        "topic_ntfy": config_app["topic_ntfy"],
+    }
 
 
-def sauvegarder_config(config: dict[str, Any]) -> None:
-    """Écrit le contenu de ``config`` dans config.json.
+def sauvegarder_config_actualise(bloc_actualise: dict[str, Any], zone_attente: str) -> None:
+    """Sauvegarde config_actualise.json (build_installe Actualise,
+    depot_github, zone_attente).
 
     Voir CONCEPTION.md, section « Contenu de config.json ».
-
-    Crée le dossier de configuration si nécessaire. Écriture atomique :
-    le contenu est d'abord écrit dans un fichier temporaire du même
-    dossier, puis basculé via ``os.replace`` — un fichier temporaire
-    partiellement écrit (interruption en cours de route) ne peut donc
-    jamais remplacer un ``config.json`` déjà valide.
     """
-    dossier_config = chemin_config_portable()
-    dossier_config.mkdir(parents=True, exist_ok=True)
-    chemin_fichier = dossier_config / _NOM_FICHIER_CONFIG
+    contenu = {**bloc_actualise, "zone_attente": zone_attente}
+    chemin_fichier = chemin_config_portable() / _NOM_FICHIER_ACTUALISE
+    _ecrire_json_atomique(chemin_fichier, contenu)
 
-    fichier_temp = tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=dossier_config,
-        prefix=f".{_NOM_FICHIER_CONFIG}.",
-        suffix=".tmp",
-        delete=False,
-    )
-    chemin_temp = Path(fichier_temp.name)
-    try:
-        with fichier_temp:
-            json.dump(config, fichier_temp, indent=2, ensure_ascii=False)
-        os.replace(chemin_temp, chemin_fichier)
-    except BaseException:
-        chemin_temp.unlink(missing_ok=True)
-        raise
+
+def sauvegarder_config_app(nom_app: str, bloc_app: dict[str, Any]) -> None:
+    """Sauvegarde config_<nom_app>.json (tous les champs
+    application_cible).
+
+    Voir CONCEPTION.md, section « Contenu de config.json ».
+    """
+    chemin_fichier = chemin_config_portable() / _nom_fichier_app(nom_app)
+    _ecrire_json_atomique(chemin_fichier, bloc_app)

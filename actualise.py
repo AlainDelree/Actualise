@@ -49,6 +49,12 @@ def analyser_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Marqueur interne : instance relancée après bascule d'auto-mise-à-jour (voir CONCEPTION.md)",
     )
+    analyseur.add_argument(
+        "--config",
+        required=True,
+        type=str.lower,
+        help="Nom de l'application cible gérée par cette instance (ex. scrabble, rummikub)",
+    )
     return analyseur.parse_args(argv)
 
 
@@ -100,17 +106,18 @@ def _chercher_zip_en_attente(zone_attente: Path, prefixe: str) -> tuple[Path, in
     return meilleur
 
 
-def _relancer_en_enfant() -> None:
+def _relancer_en_enfant(nom_app: str) -> None:
     """Relance une 2ème instance d'Actualise avec le marqueur ``--child``.
 
     Voir CONCEPTION.md, « Garde-fou anti-boucle infinie ». Gère aussi
     bien le cas d'un exécutable PyInstaller gelé (``sys.frozen``) que
-    l'exécution directe du script Python.
+    l'exécution directe du script Python. ``--config nom_app`` est
+    transmis à l'enfant pour qu'il gère la même application cible.
     """
     if getattr(sys, "frozen", False):
-        commande = [sys.executable, "--child"]
+        commande = [sys.executable, "--child", "--config", nom_app]
     else:
-        commande = [sys.executable, str(Path(__file__).resolve()), "--child"]
+        commande = [sys.executable, str(Path(__file__).resolve()), "--child", "--config", nom_app]
 
     subprocess.Popen(commande)
 
@@ -200,7 +207,7 @@ def _nettoyer_ancien_executable() -> None:
         shutil.rmtree(dossier_internal_ancien, ignore_errors=True)
 
 
-def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
+def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
     """Applique, au lancement, les mises à jour mises en attente au
     cycle précédent (étape 4 de la séquence de démarrage).
 
@@ -211,7 +218,7 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
     if est_enfant:
         return
 
-    configuration = config.charger_config()
+    configuration = config.charger_config(nom_app)
 
     try:
         zone_attente = Path(configuration["zone_attente"])
@@ -304,7 +311,12 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
                 mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
 
             bloc_config["build_installe"] = build_zip
-            config.sauvegarder_config(configuration)
+            if prefixe == "actualise":
+                config.sauvegarder_config_actualise(
+                    configuration["actualise"], configuration["zone_attente"]
+                )
+            else:
+                config.sauvegarder_config_app(nom_app, configuration["application_cible"])
 
             chemin_zip.unlink()
 
@@ -316,28 +328,30 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool) -> None:
                 # démarrer la tâche de fond — l'enfant reprend la suite de
                 # la séquence de démarrage à sa place. Voir CONCEPTION.md,
                 # « Garde-fou anti-boucle infinie ».
-                _relancer_en_enfant()
+                _relancer_en_enfant(nom_app)
                 raise SystemExit(0)
     except KeyError:
-        # Champ obligatoire manquant dans config.json : cohérent avec le
-        # choix déjà acté pour charger_config (config invalide = erreur
-        # bloquante, pas de repli silencieux) — la KeyError continue de
-        # remonter, mais avec un log explicite pour éviter une exception
-        # cryptique sans contexte.
+        # Champ obligatoire manquant dans config_actualise.json ou
+        # config_<nom_app>.json : cohérent avec le choix déjà acté pour
+        # charger_config (config invalide = erreur bloquante, pas de
+        # repli silencieux) — la KeyError continue de remonter, mais
+        # avec un log explicite pour éviter une exception cryptique sans
+        # contexte.
         _LOGGER.error(
-            "config.json incomplet : champ obligatoire manquant lors de "
-            "l'application des mises à jour en attente."
+            "config_actualise.json/config_%s.json incomplet : champ obligatoire "
+            "manquant lors de l'application des mises à jour en attente.",
+            nom_app,
         )
         raise
 
 
-def lancer_application_cible() -> None:
+def lancer_application_cible(nom_app: str) -> None:
     """Lance immédiatement l'application cible dans sa version
     actuellement installée, sans attendre aucune vérification réseau.
 
     Voir CONCEPTION.md, « Séquence de démarrage », étape 2.
     """
-    configuration = config.charger_config()
+    configuration = config.charger_config(nom_app)
     bloc_config = configuration["application_cible"]
     chemin_executable = Path(bloc_config["repertoire_installation"]) / bloc_config["executable"]
 
@@ -359,7 +373,7 @@ def _url_asset_release(depot_github: str, build: int, prefixe: str) -> str:
     return _GABARIT_URL_RELEASE.format(depot=depot_github, build=build, fichier=f"{prefixe}-v{build}.zip")
 
 
-def tache_verification_arriere_plan() -> None:
+def tache_verification_arriere_plan(nom_app: str) -> None:
     """Tâche de fond : vérifie et télécharge les mises à jour
     (Actualise et application cible), notifie via ntfy si une mise à
     jour est prête.
@@ -372,7 +386,7 @@ def tache_verification_arriere_plan() -> None:
     try:
         _LOGGER.info("Démarrage de la vérification des mises à jour en arrière-plan.")
 
-        configuration = config.charger_config()
+        configuration = config.charger_config(nom_app)
         zone_attente = Path(configuration["zone_attente"])
         zone_attente.mkdir(parents=True, exist_ok=True)
 
@@ -418,8 +432,9 @@ def configurer_logging() -> None:
     fenêtre console, écrire sur stdout/stderr peut échouer silencieusement
     sous Windows, d'où l'écriture vers un fichier plutôt que la console.
     Le dossier de ``config.chemin_config_portable()`` peut ne pas encore
-    exister au tout premier lancement (avant même que ``config.json`` n'y
-    soit écrit) : il est créé si nécessaire. ``force=True`` garantit que
+    exister au tout premier lancement (avant même que les fichiers de
+    configuration n'y soient écrits) : il est créé si nécessaire.
+    ``force=True`` garantit que
     cette configuration s'applique même si le logging a déjà été
     configuré (ex. appels répétés dans les tests).
     """
@@ -443,8 +458,9 @@ def main(argv: list[str] | None = None) -> int:
     _nettoyer_ancien_executable()
 
     # Bloc englobant : sans lui, une exception non anticipée par les
-    # except existants (ex. config.json absent dès le tout premier
-    # lancement) remonte jusqu'à --noconsole sans jamais être loguée —
+    # except existants (ex. config_actualise.json ou config_<app>.json
+    # absent dès le tout premier lancement) remonte jusqu'à --noconsole
+    # sans jamais être loguée —
     # seule une popup Windows technique s'affiche, sans rien
     # d'exploitable conservé pour diagnostiquer à distance. On logue ici
     # la stack trace complète puis on laisse l'exception se propager
@@ -454,21 +470,22 @@ def main(argv: list[str] | None = None) -> int:
     # ``BaseException`` et n'est donc jamais intercepté ici.
     try:
         arguments = analyser_arguments(argv)
+        nom_app = arguments.config
 
         # Étape 4 : bascule des mises à jour déjà téléchargées et validées
         # au cycle précédent (sautée pour Actualise si --child est présent).
         # Si une bascule d'Actualise lui-même vient d'avoir lieu, cette
         # fonction termine le process (SystemExit) avant de revenir ici.
-        appliquer_mises_a_jour_en_attente(est_enfant=arguments.child)
+        appliquer_mises_a_jour_en_attente(est_enfant=arguments.child, nom_app=nom_app)
 
         # Étape 2 : lancement immédiat de l'application cible, sans attendre
         # le réseau.
-        lancer_application_cible()
+        lancer_application_cible(nom_app)
 
         # Étape 3 : vérification et téléchargement en arrière-plan, sans
         # bloquer l'utilisateur.
         thread_verification = threading.Thread(
-            target=tache_verification_arriere_plan, daemon=True
+            target=tache_verification_arriere_plan, args=(nom_app,), daemon=True
         )
         thread_verification.start()
 
