@@ -381,6 +381,11 @@ cd /d "{dossier_actualise}"
 if exist "_internal.old" rmdir /s /q "_internal.old"
 if exist "Actualise.exe.old" del /f "Actualise.exe.old"
 powershell -NoProfile -Command "Expand-Archive -LiteralPath '{chemin_zip}' -DestinationPath '{dossier_actualise}\\maj_bat' -Force"
+if not exist "maj_bat\\_internal" (
+    echo ERREUR : extraction du zip echouee, bascule annulee.
+    rmdir /s /q "maj_bat" 2>nul
+    goto :eof
+)
 ren "_internal" "_internal.old"
 move "maj_bat\\_internal" "_internal"
 ren "Actualise.exe" "Actualise.exe.old"
