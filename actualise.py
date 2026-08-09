@@ -376,7 +376,7 @@ def lancer_application_cible(nom_app: str) -> None:
 
 
 _GABARIT_UPDATER_BAT = """@echo off
-timeout /t 3 /nobreak > nul
+timeout /t 5 /nobreak > nul
 cd /d "{dossier_actualise}"
 if exist "_internal.old" rmdir /s /q "_internal.old"
 if exist "Actualise.exe.old" del /f "Actualise.exe.old"
