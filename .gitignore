@@ -8,6 +8,17 @@ __pycache__/
 build/
 dist/
 *.spec
-# Exception : le .spec de l'exécutable Windows est committé volontairement,
-# contrairement aux artefacts *.spec habituels (temporaires).
+# Exception : les .spec des exécutables Windows sont committés
+# volontairement, contrairement aux artefacts *.spec habituels
+# (temporaires).
 !actualise.spec
+!actualise_ui.spec
+# Note : les scripts build/*.bat sont committés malgré la règle build/
+# ci-dessus (qui vise le dossier de sortie intermédiaire PyInstaller) —
+# git n'autorise pas de règle "!" pour ré-inclure un fichier dont le
+# dossier parent est exclu, donc chaque script est ajouté explicitement
+# avec `git add -f` (voir issue #328 pour rebuild_actualise.bat, issue #44
+# pour rebuild_actualise_setup.bat).
+
+# Sortie ISCC de l'installeur InnoSetup (issue #44).
+installeur/output/
