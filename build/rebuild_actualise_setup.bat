@@ -148,10 +148,13 @@ if errorlevel 1 (
         set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
     ) else if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" (
         set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+    ) else if exist "C:\.tools\InnoSetup6\ISCC.exe" (
+        set "ISCC=C:\.tools\InnoSetup6\ISCC.exe"
     ) else (
         echo.
         echo ERREUR : ISCC.exe introuvable ^(ni sur le PATH, ni dans
-        echo "Program Files\Inno Setup 6"^). Verifiez l'installation d'Inno Setup.
+        echo "Program Files\Inno Setup 6", ni dans C:\.tools\InnoSetup6^).
+        echo Verifiez l'installation d'Inno Setup.
         popd
         popd
         exit /b 1
