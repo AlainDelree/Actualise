@@ -13,12 +13,11 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import call, patch
 
 from actualise import (
     appliquer_mises_a_jour_en_attente,
     configurer_logging,
-    lancer_application_cible,
     main,
     tache_verification_arriere_plan,
 )
@@ -328,29 +327,6 @@ class TestConfigurerLogging(unittest.TestCase):
         self.assertTrue(dossier_config.is_dir())
 
 
-class TestLancerApplicationCible(unittest.TestCase):
-    @patch("actualise.subprocess.Popen")
-    @patch("actualise.config")
-    def test_popen_appele_avec_le_bon_chemin_sans_wait(self, mock_config, mock_popen):
-        mock_config.charger_config.return_value = {
-            "application_cible": {
-                "repertoire_installation": "/opt/scrabble",
-                "executable": "Scrabble.exe",
-                "nom": "Scrabble",
-                "build_installe": 47,
-                "depot_github": "AlainDelree/Scrabble",
-            }
-        }
-        mock_processus = MagicMock()
-        mock_popen.return_value = mock_processus
-
-        lancer_application_cible("scrabble")
-
-        mock_config.charger_config.assert_called_once_with("scrabble")
-        mock_popen.assert_called_once_with([str(Path("/opt/scrabble") / "Scrabble.exe")])
-        mock_processus.wait.assert_not_called()
-
-
 class TestTacheVerificationArrierePlan(unittest.TestCase):
     def setUp(self):
         self.dossier_temp = tempfile.TemporaryDirectory()
@@ -450,8 +426,8 @@ class TestMain(unittest.TestCase):
         self.mock_config.chemin_config_portable.return_value = Path(self.dossier_temp.name)
 
     def test_exception_fatale_dans_main_loguee_et_propagee(self):
-        with patch("actualise.appliquer_mises_a_jour_en_attente"), patch(
-            "actualise.lancer_application_cible", side_effect=RuntimeError("boum fatal")
+        with patch(
+            "actualise.appliquer_mises_a_jour_en_attente", side_effect=RuntimeError("boum fatal")
         ), self.assertLogs("actualise", level="ERROR") as journal:
             with self.assertRaises(RuntimeError):
                 main(["--config", "scrabble"])
@@ -459,14 +435,10 @@ class TestMain(unittest.TestCase):
         self.assertTrue(any("erreur fatale" in message for message in journal.output))
 
     def test_systemexit_relance_enfant_non_intercepte_ni_logue_comme_erreur(self):
-        with patch(
-            "actualise.appliquer_mises_a_jour_en_attente", side_effect=SystemExit(0)
-        ), patch("actualise.lancer_application_cible") as mock_lancer:
+        with patch("actualise.appliquer_mises_a_jour_en_attente", side_effect=SystemExit(0)):
             with self.assertNoLogs("actualise", level="ERROR"):
                 with self.assertRaises(SystemExit):
                     main(["--config", "scrabble"])
-
-            mock_lancer.assert_not_called()
 
 
 if __name__ == "__main__":

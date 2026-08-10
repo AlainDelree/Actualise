@@ -111,8 +111,11 @@ def _relancer_en_enfant(nom_app: str) -> None:
 
     Voir CONCEPTION.md, « Garde-fou anti-boucle infinie ». Gère aussi
     bien le cas d'un exécutable PyInstaller gelé (``sys.frozen``) que
-    l'exécution directe du script Python. ``--config nom_app`` est
-    transmis à l'enfant pour qu'il gère la même application cible.
+    l'exécution directe du script Python. ``nom_app`` ne sert plus à
+    lancer une application cible (Actualise ne lance plus aucun jeu) :
+    il est uniquement reconstruit en ``--config nom_app`` pour que
+    l'enfant sache pour quelle application cible poursuivre la
+    vérification/mise à jour en arrière-plan.
     """
     if getattr(sys, "frozen", False):
         commande = [sys.executable, "--child", "--config", nom_app]
@@ -339,10 +342,10 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                 # Une nouvelle version d'Actualise vient d'être installée :
                 # on relance la version fraîchement installée comme 2ème
                 # instance (marqueur --child), puis on termine ce process
-                # parent immédiatement, sans lancer l'application cible ni
-                # démarrer la tâche de fond — l'enfant reprend la suite de
-                # la séquence de démarrage à sa place. Voir CONCEPTION.md,
-                # « Garde-fou anti-boucle infinie ».
+                # parent immédiatement, sans démarrer la tâche de fond —
+                # l'enfant reprend la suite de la séquence de démarrage à
+                # sa place. Voir CONCEPTION.md, « Garde-fou anti-boucle
+                # infinie ».
                 _relancer_en_enfant(nom_app)
                 raise SystemExit(0)
     except KeyError:
@@ -358,21 +361,6 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
             nom_app,
         )
         raise
-
-
-def lancer_application_cible(nom_app: str) -> None:
-    """Lance immédiatement l'application cible dans sa version
-    actuellement installée, sans attendre aucune vérification réseau.
-
-    Voir CONCEPTION.md, « Séquence de démarrage », étape 2.
-    """
-    configuration = config.charger_config(nom_app)
-    bloc_config = configuration["application_cible"]
-    chemin_executable = Path(bloc_config["repertoire_installation"]) / bloc_config["executable"]
-
-    # Popen sans wait() : cycles de vie indépendants dès le lancement
-    # (voir CONCEPTION.md, « Cycle de vie du processus Actualise »).
-    subprocess.Popen([str(chemin_executable)])
 
 
 _GABARIT_UPDATER_BAT = """@echo off
@@ -576,10 +564,6 @@ def main(argv: list[str] | None = None) -> int:
         # Si une bascule d'Actualise lui-même vient d'avoir lieu, cette
         # fonction termine le process (SystemExit) avant de revenir ici.
         appliquer_mises_a_jour_en_attente(est_enfant=arguments.child, nom_app=nom_app)
-
-        # Étape 2 : lancement immédiat de l'application cible, sans attendre
-        # le réseau.
-        lancer_application_cible(nom_app)
 
         # Étape 3 : vérification et téléchargement en arrière-plan, sans
         # bloquer l'utilisateur.
