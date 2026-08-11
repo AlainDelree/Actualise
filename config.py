@@ -63,7 +63,7 @@ def _nom_fichier_app(nom_app: str) -> str:
 
 
 def _charger_json(chemin_fichier: Path) -> dict[str, Any]:
-    with open(chemin_fichier, encoding="utf-8") as f:
+    with open(chemin_fichier, encoding="utf-8-sig") as f:
         return json.load(f)
 
 

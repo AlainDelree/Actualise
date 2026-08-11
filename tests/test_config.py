@@ -162,6 +162,54 @@ class TestChargerConfig(unittest.TestCase):
         with self.assertRaises(json.JSONDecodeError):
             charger_config("scrabble")
 
+    def test_fichiers_avec_bom_utf8_sont_lus_correctement(self):
+        # InnoSetup écrit les JSON en UTF-8 avec BOM — voir issue #46.
+        (self.chemin_dossier / "config_actualise.json").write_text(
+            json.dumps(
+                {
+                    "build_installe": 6,
+                    "depot_github": "AlainDelree/Actualise",
+                    "zone_attente": "C:\\Actualise\\attente\\",
+                }
+            ),
+            encoding="utf-8-sig",
+        )
+        (self.chemin_dossier / "config_scrabble.json").write_text(
+            json.dumps(
+                {
+                    "nom": "Scrabble",
+                    "depot_github": "AlainDelree/Scrabble",
+                    "build_installe": 5,
+                    "repertoire_installation": "C:\\Scrabble\\",
+                    "executable": "Scrabble.exe",
+                    "icone": "C:\\Scrabble\\Scrabble.ico",
+                    "topic_ntfy": "actualise-scrabble",
+                }
+            ),
+            encoding="utf-8-sig",
+        )
+
+        self.assertEqual(
+            charger_config("scrabble"),
+            {
+                "actualise": {
+                    "build_installe": 6,
+                    "depot_github": "AlainDelree/Actualise",
+                },
+                "application_cible": {
+                    "nom": "Scrabble",
+                    "depot_github": "AlainDelree/Scrabble",
+                    "build_installe": 5,
+                    "repertoire_installation": "C:\\Scrabble\\",
+                    "executable": "Scrabble.exe",
+                    "icone": "C:\\Scrabble\\Scrabble.ico",
+                    "topic_ntfy": "actualise-scrabble",
+                },
+                "zone_attente": "C:\\Actualise\\attente\\",
+                "topic_ntfy": "actualise-scrabble",
+            },
+        )
+
 
 class TestSauvegarderConfigActualise(unittest.TestCase):
     def setUp(self):
