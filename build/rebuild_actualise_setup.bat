@@ -127,14 +127,14 @@ if not exist "dist\Actualise\Actualise.exe" (
     popd
     exit /b 1
 )
-if not exist "dist\ActualiseUI\ActualiseUI.exe" (
+if not exist "dist\ActualiseUI.exe" (
     echo.
-    echo ERREUR : ActualiseUI.exe introuvable dans dist\ActualiseUI apres le build.
+    echo ERREUR : ActualiseUI.exe introuvable dans dist apres le build.
     popd
     popd
     exit /b 1
 )
-echo dist\Actualise\Actualise.exe et dist\ActualiseUI\ActualiseUI.exe presents. OK.
+echo dist\Actualise\Actualise.exe et dist\ActualiseUI.exe presents. OK.
 echo.
 
 REM --- 7. Compiler l'installeur InnoSetup ------------------------------------

@@ -24,7 +24,7 @@
 ; Scrabble/Rummikub) : PyInstaller/ISCC ne doivent jamais tourner
 ; directement sur le partage VirtualBox (\\VBOXSVR\...).
 #define ActualiseSourceDir "C:\Temp\ActualiseBuild\dist\Actualise"
-#define ActualiseUISourceDir "C:\Temp\ActualiseBuild\dist\ActualiseUI"
+#define ActualiseUISourceDir "C:\Temp\ActualiseBuild\dist"
 
 [Setup]
 AppId={{8556F922-AD4A-4E8D-A7E9-08AD815D5552}
