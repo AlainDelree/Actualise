@@ -23,7 +23,7 @@
 7. Lancer Scrabble
 
 ## Points en suspens
-- Builds CCW pas encore testés sur le nouveau PC fixe Windows (Samba,
-  remplace la VM VirtualBox). Audit confirmé : aucun script de build actif
-  ne référence plus les anciens chemins VirtualBox.
+- Builds CCW sur le nouveau PC fixe Windows (Samba, remplace la VM
+  VirtualBox) validés le 20 août 2026 : chaîne PyInstaller + ISCC
+  fonctionnelle, Actualise-Setup-v9.exe produit sans erreur.
 - verifier_installation.py existe comme script standalone (pas dans un dépôt)
