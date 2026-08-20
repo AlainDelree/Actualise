@@ -24,6 +24,6 @@
 
 ## Points en suspens
 - Builds CCW pas encore testés sur le nouveau PC fixe Windows (Samba,
-  remplace la VM VirtualBox). Chemins VirtualBox (\\VBOXSVR\CCW_Share\,
-  Z:\CCW\) dans les scripts de build à adapter au nouveau partage Samba.
+  remplace la VM VirtualBox). Audit confirmé : aucun script de build actif
+  ne référence plus les anciens chemins VirtualBox.
 - verifier_installation.py existe comme script standalone (pas dans un dépôt)
