@@ -30,6 +30,17 @@ def _creer_zip_avec_manifest(chemin_zip: Path, build: int, supprimer=None) -> No
         archive.writestr("fichier.txt", "contenu")
 
 
+def _creer_zip_avec_manifest_bom_utf8(chemin_zip: Path, build: int, supprimer=None) -> None:
+    # InnoSetup écrit les JSON en UTF-8 avec BOM — voir issue #46 (même
+    # correctif que config.py, appliqué ici à manifest.json).
+    manifest = {"build": build, "supprimer": supprimer or []}
+    with zipfile.ZipFile(chemin_zip, "w") as archive:
+        archive.writestr(
+            "manifest.json", b"\xef\xbb\xbf" + json.dumps(manifest).encode("utf-8")
+        )
+        archive.writestr("fichier.txt", "contenu")
+
+
 class TestAppliquerMisesAJourEnAttenteEnfant(unittest.TestCase):
     @patch("actualise.mise_a_jour")
     @patch("actualise.config")
@@ -93,6 +104,23 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
             "scrabble", self.configuration["application_cible"]
         )
         self.mock_config.sauvegarder_config_actualise.assert_not_called()
+
+    def test_manifest_avec_bom_utf8_est_lu_correctement(self):
+        chemin_zip = self.zone_attente / "scrabble_48.zip"
+        _creer_zip_avec_manifest_bom_utf8(chemin_zip, build=48)
+
+        with patch("actualise.mise_a_jour") as mock_mise_a_jour:
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+
+            mock_mise_a_jour.extraire_zip.assert_called_once_with(
+                chemin_zip, self.repertoire_cible
+            )
+            mock_mise_a_jour.appliquer_manifeste.assert_called_once_with(
+                {"build": 48, "supprimer": []}, self.repertoire_cible
+            )
+
+        self.assertFalse(chemin_zip.exists())
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 48)
 
     def test_zip_obsolete_supprime_sans_bascule(self):
         chemin_zip = self.zone_attente / "scrabble_40.zip"

@@ -267,7 +267,9 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
 
             try:
                 with zipfile.ZipFile(chemin_zip) as archive:
-                    manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+                    manifest = json.loads(
+                        archive.read("manifest.json").decode("utf-8-sig")
+                    )
             except zipfile.BadZipFile:
                 # Zip corrompu ou pas un zip valide : bloquant, même
                 # traitement qu'un manifeste absent ci-dessous — voir
