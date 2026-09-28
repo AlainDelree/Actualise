@@ -9,3 +9,4 @@
 - Ajout d'un test de non-régression dans `tests/test_actualise.py`
   (`test_manifest_avec_bom_utf8_est_lu_correctement`), sur le modèle du test
   équivalent de `tests/test_config.py` pour l'issue #46.
+
