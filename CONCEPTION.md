@@ -69,16 +69,25 @@ des fichiers nécessaires à cette version, ainsi que le manifeste de mise
 à jour (voir « Manifeste de mise à jour » ci-dessous) — **un seul asset
 par tag de version**, quel que soit le nombre de fichiers concernés.
 
-**Nom de fichier de l'asset : fixe, sans numéro de version.** L'asset
-publié pour chaque Release porte toujours le même nom :
-**`<préfixe>.zip`** (ex. `actualise.zip`, `scrabble.zip`) — jamais de
-numéro de build dans le nom du fichier lui-même. Le numéro de version
-vit uniquement dans le **tag** de la Release, au format **`v<build>`**
-(ex. `v48`), directement dérivé de l'entier incrémental déjà acté (voir
-« Format de version »). Conséquence pratique : chaque nouvelle Release
-doit re-uploader un asset portant exactement ce nom fixe pour être
-trouvé par Actualise — c'est le tag qui change d'une Release à l'autre,
-jamais le nom de fichier de l'asset.
+**Nom de fichier de l'asset : versionné, `<préfixe>-v<build>.zip`.**
+L'asset publié pour chaque Release porte un nom différent à chaque
+build : **`<préfixe>-v<build>.zip`** (ex. `actualise-v48.zip`,
+`scrabble-v48.zip`), construit par `_url_asset_release` à partir du
+préfixe et du numéro de build. Le tag de la Release suit le même
+numéro, au format **`v<build>`** (ex. `v48`), directement dérivé de
+l'entier incrémental déjà acté (voir « Format de version ») — le nom
+de fichier de l'asset et le tag portent donc la même information de
+version, de façon redondante mais cohérente. Ce choix aligne
+Actualise sur le nommage déjà utilisé pour les applications cibles
+(ex. `Scrabble-Setup-v10.exe`) plutôt que d'introduire une convention
+différente ; il évite aussi de dépendre d'une URL « latest » qui
+resterait implicite, la publication d'une nouvelle Release restant de
+toute façon pilotée manuellement par Alain (voir « Déclenchement de
+version "officielle" » ci-dessous). Conséquence pratique : chaque
+nouvelle Release uploade un nouvel asset au nom incluant son propre
+numéro de build — les anciens assets de builds précédents restent
+disponibles sur GitHub sans être écrasés, mais seul le build indiqué
+par `version.json` est téléchargé par Actualise.
 
 Un diff binaire a été **écarté** : gain marginal face à la complexité
 ajoutée, les binaires PyInstaller étant recompilés en quasi-totalité à
@@ -629,7 +638,7 @@ et son propre dossier) à ce modèle à deux setups distincts.
 | Notifications | Un topic ntfy dédié par programme géré (règle par défaut) ; notification informative envoyée quand une mise à jour a été téléchargée en arrière-plan (effective au prochain lancement), message préfixé par `"MAJ - "` pour se distinguer visuellement d'autres types de notifications pouvant partager le même topic ; **cas particulier Scrabble** : réutilise le topic existant des notifications d'issues fermées Bridge_Agent du projet Scrabble plutôt qu'un topic dédié séparé, car seul Alain est abonné aux deux flux — voir « Contenu des fichiers de configuration » |
 | Format de version | `version.json` avec entier incrémental `build` (ex. `{"build": 47}`), comparaison `>` entre entiers — pas de semver ni de comparaison de chaînes brute (piège "9" > "10" lexicographique) |
 | Fichiers `version.json` | Deux fichiers distincts et indépendants : un dans le dépôt Actualise, un dans le dépôt de chaque application cible (URL construite depuis `config_<nom_app>.json`) |
-| Distribution des binaires | Assets de GitHub Releases (URL stable `releases/download/<tag>/<fichier>`), pas commités dans l'historique ; **un seul asset par tag, sous forme d'archive zip** contenant tous les fichiers de la version (exécutable, données, DLL) et le manifeste ; **nom d'asset fixe `<préfixe>.zip`** (ex. `actualise.zip`, `scrabble.zip`), sans numéro de version dans le nom du fichier — chaque nouvelle Release re-uploade un asset de ce même nom ; **tag de Release au format `v<build>`** (ex. `v48`) ; diff binaire écarté (gain marginal, binaires PyInstaller recompilés quasi-intégralement à chaque changement) |
+| Distribution des binaires | Assets de GitHub Releases (URL stable `releases/download/<tag>/<fichier>`), pas commités dans l'historique ; **un seul asset par tag, sous forme d'archive zip** contenant tous les fichiers de la version (exécutable, données, DLL) et le manifeste ; **nom d'asset versionné `<préfixe>-v<build>.zip`** (ex. `actualise-v48.zip`, `scrabble-v48.zip`), construit par `_url_asset_release` — cohérent avec le nommage déjà utilisé pour les applications cibles (ex. `Scrabble-Setup-v10.exe`), sans dépendre d'une URL « latest » puisque la publication reste pilotée manuellement par Alain ; **tag de Release au format `v<build>`** (ex. `v48`) ; diff binaire écarté (gain marginal, binaires PyInstaller recompilés quasi-intégralement à chaque changement) |
 | `version.json` (stockage) | Reste un petit fichier commité normalement dans le dépôt, pas un asset de Release |
 | Manifeste de mise à jour | `manifest.json` à la racine du zip (`{"build": N, "supprimer": [...]}`) ; `supprimer` est une liste noire optionnelle de chemins à effacer après extraction — fail-safe (un oubli laisse un fichier obsolète, jamais une perte de données) ; script `.bat`/`.sh` exécutable écarté pour portabilité Linux/Windows et sécurité (pas d'exécution de code téléchargé sans supervision) ; **`manifest.json` absent → bloquant** : bascule échoue, non appliquée, zip conservé pour nouvelle tentative ultérieure (zip considéré malformé, pas une absence volontaire de suppression) |
 | Timeout réseau | 2 à 3 secondes sur toute requête de vérification de version ; dépassement traité comme échec réseau |
