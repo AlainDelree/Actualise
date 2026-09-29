@@ -16,6 +16,10 @@ REM donc tout ce qui est necessaire vers un dossier local
 REM (C:\Temp\ActualiseBuild), on construit et on compile l'installeur
 REM entierement la-bas, puis on ne recopie vers le partage QUE le setup final
 REM (installeur\output\Actualise-Setup-v<N>.exe).
+REM Ce setup final est recopie a DEUX emplacements (voir etape 8bis, issue
+REM #63) : dans le worktree d'origine (ORIGDIR, variable selon le worktree)
+REM ET vers C:\CCW_Share\_derniers_builds\actualise\, chemin fixe identique
+REM quel que soit le worktree, pour le retrouver sans avoir a chercher.
 echo [1/8] Copie des sources vers le repertoire de build local...
 set "LOCALBUILD=C:\Temp\ActualiseBuild"
 if exist "%LOCALBUILD%" (
@@ -190,6 +194,25 @@ if %errorlevel% geq 8 (
     exit /b 1
 )
 echo [OK] installeur\output\Actualise-Setup-v9.exe copie vers %ORIGDIR%\installeur\output\
+
+REM --- 8bis. Recopier en plus vers un chemin fixe et previsible (issue #63) --
+REM ORIGDIR depend du worktree d'ou le script est lance, donc jamais le meme
+REM d'un build a l'autre. On ajoute ici une copie vers un second emplacement
+REM FIXE et identique quel que soit le worktree, pour qu'on sache toujours ou
+REM retrouver le dernier setup produit sans avoir a chercher sur le partage.
+REM Ecrase sans confirmation le fichier deja present a cet emplacement : c'est
+REM le but recherche (toujours le dernier artefact produit, peu importe
+REM l'origine).
+set "FIXEDSHARE=C:\CCW_Share\_derniers_builds\actualise"
+robocopy "installeur\output" "%FIXEDSHARE%" "Actualise-Setup-v9.exe" /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+if %errorlevel% geq 8 (
+    echo.
+    echo ERREUR : la recopie du setup vers le chemin fixe %FIXEDSHARE% a echoue.
+    popd
+    popd
+    exit /b 1
+)
+echo [OK] installeur\output\Actualise-Setup-v9.exe copie vers %FIXEDSHARE%\ ^(chemin fixe^)
 
 popd
 rmdir /s /q "%LOCALBUILD%"
