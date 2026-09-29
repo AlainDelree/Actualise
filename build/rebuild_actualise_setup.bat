@@ -191,6 +191,30 @@ if %errorlevel% geq 8 (
 )
 echo [OK] installeur\output\Actualise-Setup-v9.exe copie vers %ORIGDIR%\installeur\output\
 
+REM Recopie egalement dist\ vers le partage (Actualise.exe, _internal\,
+REM ActualiseUI.exe) : sans cela dist\ n'existe que dans %LOCALBUILD%, qui
+REM est detruit en fin de script, et build\publier_actualise.bat (issue #62)
+REM n'a plus rien a publier tant qu'on n'a pas relance tout le build. Le
+REM setup compile n'est jamais reinstalle a partir de ce dist\ : il ne sert
+REM qu'a la publication du zip de self-update.
+robocopy "dist\Actualise" "%ORIGDIR%\dist\Actualise" /MIR /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+if %errorlevel% geq 8 (
+    echo.
+    echo ERREUR : la recopie de dist\Actualise vers le partage a echoue.
+    popd
+    popd
+    exit /b 1
+)
+robocopy "dist" "%ORIGDIR%\dist" "ActualiseUI.exe" /NFL /NDL /NJH /NJS /NC /NS /NP >nul
+if %errorlevel% geq 8 (
+    echo.
+    echo ERREUR : la recopie de dist\ActualiseUI.exe vers le partage a echoue.
+    popd
+    popd
+    exit /b 1
+)
+echo [OK] dist\Actualise\ et dist\ActualiseUI.exe copies vers %ORIGDIR%\dist\
+
 popd
 rmdir /s /q "%LOCALBUILD%"
 echo [OK] Repertoire de build local nettoye ^(%LOCALBUILD%^)
