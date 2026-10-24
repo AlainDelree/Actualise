@@ -392,25 +392,177 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
 _NOM_FICHIER_CONFIG_ACTUALISE = "config_actualise.json"
 
 _GABARIT_UPDATER_BAT = """@echo off
-timeout /t 5 /nobreak > nul
+setlocal enabledelayedexpansion
 cd /d "{dossier_actualise}"
+
+set "LOG=updater.log"
+set "ZIP={chemin_zip}"
+set "FLAG={chemin_flag}"
+set "CONFIG={chemin_config_actualise}"
+set "BUILD={build}"
+set "EXTRACT_DIR=maj_bat"
+
+rem ACTUALISE_UPDATER_MAX_ATTENTE (secondes) : surchargeable par
+rem variable d'environnement pour les tests, sinon valeur par defaut.
+if not defined ACTUALISE_UPDATER_MAX_ATTENTE set "ACTUALISE_UPDATER_MAX_ATTENTE=30"
+
+rem Rotation du journal : évite une croissance illimitée sur plusieurs
+rem exécutions successives, en gardant un historique raisonnable.
+if exist "%LOG%" (
+    for %%A in ("%LOG%") do if %%~zA GTR 102400 (
+        powershell -NoProfile -Command "try {{ (Get-Content -LiteralPath '%LOG%' -Tail 200) | Set-Content -LiteralPath '%LOG%' -Encoding UTF8 }} catch {{ }}"
+    )
+)
+
+call :log "=== updater.bat demarre (build cible %BUILD%) ==="
+
+rem 1) Attend reellement la fin de Actualise.exe et ActualiseUI.exe (qui
+rem    verrouillent _internal/Actualise.exe/ActualiseUI.exe pendant leur
+rem    execution) avant de toucher a quoi que ce soit. Abandon sans
+rem    aucune modification si la limite de temps est atteinte.
+set "_ATTENTES=0"
+:attente_processus
+set "_ENCORE=0"
+tasklist /fi "imagename eq Actualise.exe" 2>nul | findstr /i "Actualise.exe" >nul && set "_ENCORE=1"
+tasklist /fi "imagename eq ActualiseUI.exe" 2>nul | findstr /i "ActualiseUI.exe" >nul && set "_ENCORE=1"
+if "%_ENCORE%"=="0" goto :processus_termines
+set /a _ATTENTES+=1
+if %_ATTENTES% GEQ %ACTUALISE_UPDATER_MAX_ATTENTE% (
+    call :log "ABANDON : Actualise.exe ou ActualiseUI.exe tourne encore apres !_ATTENTES!s d'attente, bascule annulee, rien modifie."
+    goto :fin
+)
+timeout /t 1 /nobreak > nul
+goto :attente_processus
+:processus_termines
+
+rem Nettoyage des reliquats d'une tentative precedente, avant de
+rem recommencer (ne rien supposer sur leur presence).
+if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%"
 if exist "_internal.old" rmdir /s /q "_internal.old"
 if exist "Actualise.exe.old" del /f "Actualise.exe.old"
-powershell -NoProfile -Command "Expand-Archive -LiteralPath '{chemin_zip}' -DestinationPath '{dossier_actualise}\\maj_bat' -Force"
-if not exist "maj_bat\\_internal" (
-    echo ERREUR : extraction du zip echouee, bascule annulee.
-    rmdir /s /q "maj_bat" 2>nul
-    goto :eof
+if exist "ActualiseUI.exe.old" del /f "ActualiseUI.exe.old"
+
+rem 2) Extraction controlee : zip invalide/illisible = echec detecte,
+rem    rien n'est modifie, le zip est conserve pour une nouvelle
+rem    tentative au prochain declenchement.
+powershell -NoProfile -Command "try {{ Expand-Archive -LiteralPath '%ZIP%' -DestinationPath '%EXTRACT_DIR%' -Force; exit 0 }} catch {{ exit 1 }}"
+if errorlevel 1 (
+    call :log "ECHEC : extraction du zip impossible (zip invalide ou illisible) ; rien modifie, zip conserve."
+    rmdir /s /q "%EXTRACT_DIR%" 2>nul
+    goto :fin
 )
+if not exist "%EXTRACT_DIR%\\_internal" (
+    call :log "ECHEC : _internal absent de l'archive extraite ; rien modifie, zip conserve."
+    rmdir /s /q "%EXTRACT_DIR%" 2>nul
+    goto :fin
+)
+if not exist "%EXTRACT_DIR%\\Actualise.exe" (
+    call :log "ECHEC : Actualise.exe absent de l'archive extraite ; rien modifie, zip conserve."
+    rmdir /s /q "%EXTRACT_DIR%" 2>nul
+    goto :fin
+)
+if not exist "%EXTRACT_DIR%\\ActualiseUI.exe" (
+    call :log "ECHEC : ActualiseUI.exe absent de l'archive extraite ; rien modifie, zip conserve."
+    rmdir /s /q "%EXTRACT_DIR%" 2>nul
+    goto :fin
+)
+
+rem 3) Bascule des trois elements, chacune controlee (renommage puis
+rem    deplacement vers le nom libere - jamais un deplacement direct
+rem    vers un nom de dossier/fichier encore existant, qui imbriquerait
+rem    le contenu au lieu de le remplacer). Tout echec declenche la
+rem    restauration de ce qui a deja ete bascule (ordre inverse).
+set "_OK_INTERNAL=0"
+set "_OK_EXE=0"
+set "_OK_UI=0"
+
 ren "_internal" "_internal.old"
-move "maj_bat\\_internal" "_internal"
+if errorlevel 1 (
+    call :log "ECHEC : _internal verrouille, renommage impossible ; rien modifie, zip conserve."
+    goto :fin
+)
+move /y "%EXTRACT_DIR%\\_internal" "_internal" >nul
+if errorlevel 1 (
+    call :log "ECHEC : impossible de deplacer le nouveau _internal ; restauration."
+    ren "_internal.old" "_internal"
+    goto :fin
+)
+set "_OK_INTERNAL=1"
+
 ren "Actualise.exe" "Actualise.exe.old"
-move "maj_bat\\Actualise.exe" "Actualise.exe"
-rmdir /s /q "maj_bat"
-powershell -NoProfile -Command "try {{ $p = '{chemin_config_actualise}'; $cfg = Get-Content -Raw -Path $p | ConvertFrom-Json; $cfg.build_installe = {build}; $json = $cfg | ConvertTo-Json -Depth 5; $tmp = $p + '.tmp'; [System.IO.File]::WriteAllText($tmp, $json, [System.Text.UTF8Encoding]::new($false)); Move-Item -Force $tmp $p }} catch {{ }}"
-del "{chemin_zip}"
-del "{chemin_flag}"
+if errorlevel 1 (
+    call :log "ECHEC : Actualise.exe verrouille, renommage impossible ; restauration."
+    goto :annuler
+)
+move /y "%EXTRACT_DIR%\\Actualise.exe" "Actualise.exe" >nul
+if errorlevel 1 (
+    call :log "ECHEC : impossible de deplacer le nouveau Actualise.exe ; restauration."
+    ren "Actualise.exe.old" "Actualise.exe"
+    goto :annuler
+)
+set "_OK_EXE=1"
+
+ren "ActualiseUI.exe" "ActualiseUI.exe.old"
+if errorlevel 1 (
+    call :log "ECHEC : ActualiseUI.exe verrouille, renommage impossible ; restauration."
+    goto :annuler
+)
+move /y "%EXTRACT_DIR%\\ActualiseUI.exe" "ActualiseUI.exe" >nul
+if errorlevel 1 (
+    call :log "ECHEC : impossible de deplacer le nouveau ActualiseUI.exe ; restauration."
+    ren "ActualiseUI.exe.old" "ActualiseUI.exe"
+    goto :annuler
+)
+set "_OK_UI=1"
+
+goto :bascule_ok
+
+:annuler
+if "%_OK_UI%"=="1" (
+    del /f "ActualiseUI.exe" 2>nul
+    ren "ActualiseUI.exe.old" "ActualiseUI.exe"
+)
+if "%_OK_EXE%"=="1" (
+    del /f "Actualise.exe" 2>nul
+    ren "Actualise.exe.old" "Actualise.exe"
+)
+if "%_OK_INTERNAL%"=="1" (
+    rmdir /s /q "_internal" 2>nul
+    ren "_internal.old" "_internal"
+)
+call :log "Bascule annulee, installation restauree dans son etat initial ; zip conserve."
+rmdir /s /q "%EXTRACT_DIR%" 2>nul
+goto :fin
+
+:bascule_ok
+call :log "Bascule reussie : _internal, Actualise.exe et ActualiseUI.exe remplaces."
+rmdir /s /q "%EXTRACT_DIR%" 2>nul
+if exist "_internal.old" rmdir /s /q "_internal.old"
+if exist "Actualise.exe.old" del /f "Actualise.exe.old"
+if exist "ActualiseUI.exe.old" del /f "ActualiseUI.exe.old"
+
+rem 4) build_installe n'est reecrit qu'une fois la bascule des fichiers
+rem    effectivement reussie - jamais avant, jamais si elle a echoue.
+powershell -NoProfile -Command "try {{ $p = '%CONFIG%'; $cfg = Get-Content -Raw -Path $p | ConvertFrom-Json; $cfg.build_installe = %BUILD%; $json = $cfg | ConvertTo-Json -Depth 5; $tmp = $p + '.tmp'; [System.IO.File]::WriteAllText($tmp, $json, [System.Text.UTF8Encoding]::new($false)); Move-Item -Force $tmp $p; exit 0 }} catch {{ exit 1 }}"
+if errorlevel 1 (
+    call :log "ATTENTION : bascule des fichiers reussie mais echec de l'ecriture de build_installe dans config_actualise.json."
+    goto :fin
+)
+call :log "build_installe reecrit a %BUILD%."
+
+del /f "%ZIP%" 2>nul
+del /f "%FLAG%" 2>nul
+call :log "Zip et flag supprimes, mise a jour terminee avec succes."
+
 if "%~1"=="--relancer" start "" "%~2"
+
+:fin
+endlocal
+goto :eof
+
+:log
+>>"%LOG%" echo %date% %time% %~1
+exit /b 0
 """
 
 
@@ -426,21 +578,46 @@ def _generer_updater_bat(
     fois Actualise fermé, effectue la bascule à sa place. Retourne le
     chemin du bat généré.
 
+    Fiabilisé par l'issue #68 (le gabarit précédent, inchangé depuis la
+    v10, échouait en silence : pas d'attente réelle de la fin des
+    processus, pas de contrôle des renommages/déplacements, pas de
+    journal, et ``ActualiseUI.exe`` n'était jamais basculé). Le bat
+    généré ici :
+
+    1. attend réellement la fin de ``Actualise.exe`` et
+       ``ActualiseUI.exe`` (``tasklist``, scrutés toutes les secondes,
+       limite ``ACTUALISE_UPDATER_MAX_ATTENTE`` secondes — 30 par
+       défaut, surchargeable par variable d'environnement pour les
+       tests) ; abandon sans aucune modification si la limite est
+       atteinte ;
+    2. contrôle chaque étape (extraction, puis renommage+déplacement de
+       ``_internal``, ``Actualise.exe`` et ``ActualiseUI.exe``) ; tout
+       échec restaure l'installation dans son état initial (annulation
+       dans l'ordre inverse des étapes déjà effectuées) et conserve le
+       zip pour une nouvelle tentative — jamais de déplacement direct
+       vers un nom encore existant (``move`` imbriquerait le contenu au
+       lieu de le remplacer : comportement vérifié), toujours un
+       renommage préalable qui libère le nom cible ;
+    3. écrit un journal ``updater.log`` dans ``dossier_actualise`` (une
+       ligne horodatée par étape/échec), tronqué aux 200 dernières
+       lignes dès qu'il dépasse 100 Ko pour rester borné d'une exécution
+       à l'autre.
+
     Le bat réécrit aussi ``build_installe`` dans ``config_actualise.json``
     (``{build}``, le build réellement extrait) une fois la bascule
     effective — voir issue #66 : auparavant, ce chemin de mise à jour ne
     touchait jamais cette valeur, faisant retélécharger indéfiniment la
     même version. L'écriture se fait volontairement *après* le
-    remplacement de ``Actualise.exe``/``_internal`` et *avant* la
-    suppression du zip source : si le bat est interrompu avant
-    l'écriture, le zip reste considéré comme en attente et la bascule
-    sera retentée au prochain lancement (pas de perte) ; s'il est
-    interrompu après, le zip restant serait de toute façon vu comme un
-    résidu obsolète (``build`` ≤ ``build_installe``) puisque la bascule a
-    déjà eu lieu. Écrit via ``[System.IO.File]::WriteAllText`` avec un
-    ``UTF8Encoding($false)`` explicite pour garantir l'absence de BOM
-    (même convention que ``config._ecrire_json_atomique``), puis bascule
-    par ``Move-Item -Force`` (équivalent de l'écriture atomique
+    remplacement de ``Actualise.exe``/``_internal``/``ActualiseUI.exe``
+    et *avant* la suppression du zip source : si le bat est interrompu
+    avant l'écriture, le zip reste considéré comme en attente et la
+    bascule sera retentée au prochain lancement (pas de perte) ; s'il
+    est interrompu après, le zip restant serait de toute façon vu comme
+    un résidu obsolète (``build`` ≤ ``build_installe``) puisque la
+    bascule a déjà eu lieu. Écrit via ``[System.IO.File]::WriteAllText``
+    avec un ``UTF8Encoding($false)`` explicite pour garantir l'absence
+    de BOM (même convention que ``config._ecrire_json_atomique``), puis
+    bascule par ``Move-Item -Force`` (équivalent de l'écriture atomique
     ``os.replace`` déjà utilisée côté Python).
     """
     chemin_bat = dossier_actualise / "updater.bat"

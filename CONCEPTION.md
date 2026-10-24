@@ -523,9 +523,17 @@ Déroulé :
    et télécharge une nouvelle version d'**Actualise lui-même**, elle
    génère immédiatement, en plus du zip placé en zone d'attente :
    - `updater.bat`, dans le dossier partagé d'Actualise
-     (`C:\Actualise\`) — script qui effectue la bascule réelle
-     (renommage de `_internal\`/`Actualise.exe` en `.old`, extraction du
-     zip, nettoyage) ;
+     (`C:\Actualise\`) — script qui effectue la bascule réelle des
+     **trois** éléments (`_internal\`, `Actualise.exe` et
+     `ActualiseUI.exe`, chacun renommé en `.old` puis remplacé par
+     renommage/déplacement, jamais un déplacement direct vers un nom
+     encore existant — voir issue #68, qui a fiabilisé ce script :
+     attente réelle de la fin de `Actualise.exe`/`ActualiseUI.exe`
+     (sinon abandon sans rien modifier), contrôle de chaque étape avec
+     restauration de l'état initial en cas d'échec, `build_installe`
+     réécrit et zip/flag supprimés seulement après bascule confirmée,
+     et journal `updater.log` (borné en taille) dans
+     `dossier_actualise`) ;
    - `actualise_update.flag`, un JSON déposé dans le
      `repertoire_installation` de **l'application cible** (pas dans le
      dossier d'Actualise), contenant les chemins vers `ActualiseUI.exe`
