@@ -68,34 +68,39 @@ REM  du depot lui-meme (comme Rummikub), absent dans un worktree frais.
 REM ===========================================================================
 echo.
 echo [0/9] Recherche de ISCC.exe (Inno Setup 6)...
+REM  %ProgramFiles(x86)% contient des parentheses dans sa VALEUR (pas
+REM  seulement son nom) : toute reference, meme via une variable simple,
+REM  depuis l'INTERIEUR d'un bloc if/else parenthese casse l'analyse
+REM  syntaxique de cmd.exe (comptage de parentheses sur le bloc entier avant
+REM  execution). D'ou la forme plate ci-dessous (if/goto), sans aucun bloc.
+set "PF86=%ProgramFiles(x86)%"
+set "PF=%ProgramFiles%"
 set "ISCC="
-if exist "C:\CCW\tools\InnoSetup6\ISCC.exe" (
-    set "ISCC=C:\CCW\tools\InnoSetup6\ISCC.exe"
-) else (
-    where ISCC >nul 2>&1
-    if not errorlevel 1 (
-        set "ISCC=ISCC"
-    ) else if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" (
-        set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
-    ) else if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" (
-        set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
-    ) else if exist "C:\.tools\InnoSetup6\ISCC.exe" (
-        set "ISCC=C:\.tools\InnoSetup6\ISCC.exe"
-    ) else if exist "%ORIGDIR%\.tools\InnoSetup6\ISCC.exe" (
-        set "ISCC=%ORIGDIR%\.tools\InnoSetup6\ISCC.exe"
-    )
-)
-if not defined ISCC (
-    echo [ERREUR] ISCC.exe introuvable dans aucun des emplacements suivants :
-    echo            - C:\CCW\tools\InnoSetup6\ISCC.exe
-    echo            - PATH ^(where ISCC^)
-    echo            - %ProgramFiles(x86)%\Inno Setup 6\ISCC.exe
-    echo            - %ProgramFiles%\Inno Setup 6\ISCC.exe
-    echo            - C:\.tools\InnoSetup6\ISCC.exe
-    echo            - %ORIGDIR%\.tools\InnoSetup6\ISCC.exe
-    echo          Installez Inno Setup 6 dans l'un de ces emplacements avant de relancer le build.
-    exit /b 1
-)
+if exist "C:\CCW\tools\InnoSetup6\ISCC.exe" set "ISCC=C:\CCW\tools\InnoSetup6\ISCC.exe"
+if defined ISCC goto iscc_trouve
+where ISCC >nul 2>&1
+if errorlevel 1 goto iscc_check_pf86
+set "ISCC=ISCC"
+goto iscc_trouve
+:iscc_check_pf86
+if exist "%PF86%\Inno Setup 6\ISCC.exe" set "ISCC=%PF86%\Inno Setup 6\ISCC.exe"
+if defined ISCC goto iscc_trouve
+if exist "%PF%\Inno Setup 6\ISCC.exe" set "ISCC=%PF%\Inno Setup 6\ISCC.exe"
+if defined ISCC goto iscc_trouve
+if exist "C:\.tools\InnoSetup6\ISCC.exe" set "ISCC=C:\.tools\InnoSetup6\ISCC.exe"
+if defined ISCC goto iscc_trouve
+if exist "%ORIGDIR%\.tools\InnoSetup6\ISCC.exe" set "ISCC=%ORIGDIR%\.tools\InnoSetup6\ISCC.exe"
+if defined ISCC goto iscc_trouve
+echo [ERREUR] ISCC.exe introuvable dans aucun des emplacements suivants :
+echo            - C:\CCW\tools\InnoSetup6\ISCC.exe
+echo            - PATH ^(where ISCC^)
+echo            - %PF86%\Inno Setup 6\ISCC.exe
+echo            - %PF%\Inno Setup 6\ISCC.exe
+echo            - C:\.tools\InnoSetup6\ISCC.exe
+echo            - %ORIGDIR%\.tools\InnoSetup6\ISCC.exe
+echo          Installez Inno Setup 6 dans l'un de ces emplacements avant de relancer le build.
+exit /b 1
+:iscc_trouve
 echo       ISCC : %ISCC%
 
 REM ===========================================================================
