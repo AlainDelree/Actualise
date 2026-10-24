@@ -32,15 +32,37 @@ REM                   gh release create (etapes manuelles, cf. rappel final).
 REM  --build N      : force le numero de build (sinon = build de version.json
 REM                   + 1). S'applique a l'installeur, a l'archive, au
 REM                   manifeste et a version.json, quel que soit le mode.
+REM                   N doit etre un entier strictement superieur au build
+REM                   courant de version.json : refuse sinon, avant toute
+REM                   construction ou copie, meme sans --publier (l'etape 9
+REM                   copie toujours vers le dossier fixe). --build sans
+REM                   valeur, ou tout argument inconnu, est egalement
+REM                   refuse (plus d'avertissement silencieux).
 set "PUBLIER=0"
 set "BUILD_OVERRIDE="
 :parse_args
 if "%~1"=="" goto args_done
 if /i "%~1"=="--publier" ( set "PUBLIER=1" & shift /1 & goto parse_args )
-if /i "%~1"=="--build" ( set "BUILD_OVERRIDE=%~2" & shift /1 & shift /1 & goto parse_args )
-echo [ATTENTION] Argument inconnu ignore : %~1
-shift /1
-goto parse_args
+if /i "%~1"=="--build" (
+    if "%~2"=="" (
+        echo [ERREUR] --build necessite une valeur numerique ^(exemple : --build 42^).
+        echo           Arguments acceptes : --publier, --build N
+        exit /b 1
+    )
+    echo %~2| findstr /r "^[0-9][0-9]*$" >nul
+    if errorlevel 1 (
+        echo [ERREUR] --build necessite un entier positif ; recu : %~2
+        echo           Arguments acceptes : --publier, --build N
+        exit /b 1
+    )
+    set "BUILD_OVERRIDE=%~2"
+    shift /1
+    shift /1
+    goto parse_args
+)
+echo [ERREUR] Argument inconnu : %~1
+echo           Arguments acceptes : --publier, --build N
+exit /b 1
 :args_done
 
 REM --- Racine du depot = dossier parent de ce .bat (build\ -> ..) -----------
@@ -118,6 +140,13 @@ if not defined CURBUILD (
 )
 if defined BUILD_OVERRIDE (
     set "BUILD=%BUILD_OVERRIDE%"
+    if !BUILD! LEQ %CURBUILD% (
+        echo [ERREUR] --build !BUILD! invalide : doit etre un entier strictement
+        echo          superieur au build courant de version.json ^(%CURBUILD%^),
+        echo          publie ou non, car la copie vers le dossier fixe a lieu
+        echo          dans tous les modes ^(avec ou sans --publier^).
+        exit /b 1
+    )
     echo       Build impose via --build : !BUILD!
 ) else (
     set /a BUILD=CURBUILD+1
