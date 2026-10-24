@@ -13,16 +13,17 @@
 ; (voir INTEGRATION.md, §3 "Raccourci").
 ;
 ; Compilation : ISCC installeur\actualise.iss /DActualiseVersion=<N>
-; (voir build\rebuild_actualise_setup.bat). Sans /D, repli sur 9 — dernier
-; build publié au moment de l'écriture de ce script (voir version.json).
+; (voir build\rebuild_actualise.bat, qui passe toujours ce paramètre).
+; Sans /D, repli sur 9 — dernier build publié au moment de l'écriture de
+; ce script (voir version.json).
 
 #ifndef ActualiseVersion
   #define ActualiseVersion "9"
 #endif
 
 ; Staging local CCW (même pattern que build\rebuild_actualise.bat et
-; Scrabble/Rummikub) : PyInstaller/ISCC ne doivent jamais tourner
-; directement sur le partage VirtualBox (\\VBOXSVR\...).
+; Scrabble/Rummikub) : PyInstaller/ISCC construisent dans un dossier local
+; (C:\Temp\ActualiseBuild), jamais directement dans le worktree.
 #define ActualiseSourceDir "C:\Temp\ActualiseBuild\dist\Actualise"
 #define ActualiseUISourceDir "C:\Temp\ActualiseBuild\dist"
 
