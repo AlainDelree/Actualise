@@ -1,3 +1,6 @@
 ## TACHES POUR PLUS TARD
 ----------------------------
-Backlog Actualise — permettre des noms d'assets versionnés (scrabble-v3.zip au lieu de scrabble.zip), en faisant construire le nom dynamiquement par Actualise à partir du numéro de build, ou en interrogeant la liste des assets de la Release GitHub.
+Renommer build\rebuild_actualise_unifie.bat en rebuild_actualise.bat et retirer les trois anciens scripts (rebuild_actualise.bat, rebuild_actualise_setup.bat, publier_actualise.bat) ainsi que les commentaires qui les citent.
+Fiabiliser updater.bat, notamment le remplacement d'ActualiseUI.exe lors de la bascule.
+Intégrer CHANGELOG-67.md à CHANGELOG.md.
+Tester réellement la mise à jour d'une application cible (Scrabble ou Rummikub) par updater.bat au prochain build d'un jeu.
