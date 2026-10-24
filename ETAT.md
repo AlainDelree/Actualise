@@ -45,9 +45,9 @@
   Release (étiquette v<N>, deux fichiers attachés), puis pousser master
 
 ## Points en suspens
-- Builds CCW sur le nouveau PC fixe Windows (Samba, remplace la VM
-  VirtualBox) validés le 20 août 2026 : chaîne PyInstaller + ISCC
-  fonctionnelle, Actualise-Setup-v9.exe produit sans erreur.
+- Builds CCW sur le PC fixe Windows (partage Samba) validés le 20 août 2026 :
+  chaîne PyInstaller + ISCC fonctionnelle, Actualise-Setup-v9.exe produit
+  sans erreur.
 - verifier_installation.py existe comme script standalone (pas dans un dépôt)
 - Cause exacte de l'échec d'extraction observé en Program Files (droits
   insuffisants, ou fichiers verrouillés parce que l'application cible —
