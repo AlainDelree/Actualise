@@ -235,6 +235,35 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
 
         self.assertEqual(self.configuration["application_cible"]["build_installe"], 48)
 
+    def test_echec_extraction_application_cible_zip_conserve_aucune_exception(self):
+        # Non-régression issue #66 : une erreur d'extraction pour
+        # l'application cible (droits insuffisants, fichier verrouillé
+        # parce que l'application tourne encore) ne doit jamais faire
+        # planter Actualise ni être silencieusement ignorée — le zip est
+        # conservé pour une nouvelle tentative et build_installe n'est
+        # pas modifié tant que la bascule n'a pas réussi.
+        chemin_zip = self.zone_attente / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        with patch("actualise.mise_a_jour") as mock_mise_a_jour, self.assertLogs(
+            "actualise", level="ERROR"
+        ) as journal:
+            mock_mise_a_jour.extraire_zip.side_effect = PermissionError(
+                "Permission denied: 'C:\\Program Files\\Scrabble\\clr_loader\\"
+                "ffi\\dlls\\amd64\\ClrLoader.dll'"
+            )
+
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+
+            mock_mise_a_jour.appliquer_manifeste.assert_not_called()
+
+        self.assertTrue(chemin_zip.exists())
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
+        self.mock_config.sauvegarder_config_app.assert_not_called()
+        self.assertTrue(
+            any("extraction" in message.lower() for message in journal.output)
+        )
+
     def test_aucun_zip_ne_fait_rien(self):
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
             appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
@@ -415,6 +444,39 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
 
         self.assertTrue((self.zone_attente / "actualise_11.zip").exists())
         self.assertTrue((self.zone_attente / "scrabble_48.zip").exists())
+
+    def test_bat_updater_genere_avec_le_build_reellement_telecharge(self):
+        # Non-régression issue #66 : le bat généré pour la mise à jour
+        # d'Actualise via la fenêtre/updater.bat doit recevoir le numéro
+        # de build réellement téléchargé, pour pouvoir réécrire
+        # build_installe une fois la bascule effective (sans quoi
+        # config_actualise.json reste périmé et Actualise retélécharge
+        # indéfiniment la même version).
+        chemin_temp_actualise = Path(self.dossier_temp.name) / "telecharge_actualise_tmp.zip"
+        chemin_temp_actualise.write_bytes(b"contenu-actualise")
+        chemin_temp_scrabble = Path(self.dossier_temp.name) / "telecharge_scrabble_tmp.zip"
+        chemin_temp_scrabble.write_bytes(b"contenu-scrabble")
+
+        with patch("actualise.version_check") as mock_version_check, patch(
+            "actualise.mise_a_jour"
+        ) as mock_mise_a_jour, patch("actualise.notifications"), patch(
+            "actualise._generer_updater_bat"
+        ) as mock_generer_bat, patch("actualise._ecrire_flag_maj") as mock_ecrire_flag:
+            mock_version_check.verifier_version.side_effect = [
+                {"build": 11, "sha256": "hash-actualise"},
+                {"build": 48, "sha256": "hash-scrabble"},
+            ]
+            mock_mise_a_jour.telecharger_zip.side_effect = [
+                chemin_temp_actualise,
+                chemin_temp_scrabble,
+            ]
+
+            tache_verification_arriere_plan("scrabble")
+
+            mock_generer_bat.assert_called_once()
+            build_passe = mock_generer_bat.call_args[0][-1]
+            self.assertEqual(build_passe, 11)
+            mock_ecrire_flag.assert_called_once()
 
     def test_pas_de_mise_a_jour_ne_fait_rien(self):
         with patch("actualise.version_check") as mock_version_check, patch(

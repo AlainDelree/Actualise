@@ -323,12 +323,36 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
 
                 mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
             else:
-                # L'exécutable de l'application cible n'est pas en
-                # cours d'exécution au moment de la bascule (contexte
-                # différent d'Actualise lui-même) : l'extraction
-                # directe reste valide et sans risque.
-                mise_a_jour.extraire_zip(chemin_zip, repertoire_installation)
-                mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
+                # L'exécutable de l'application cible n'est en
+                # principe pas en cours d'exécution au moment de la
+                # bascule (contexte différent d'Actualise lui-même),
+                # mais l'extraction directe dans
+                # repertoire_installation peut malgré tout échouer :
+                # droits insuffisants (ex. Program Files sans
+                # élévation) ou fichier verrouillé parce que
+                # l'application tourne encore (elle lance Actualise à
+                # son démarrage) — voir issue #66. ``extractall``
+                # n'étant pas atomique, l'échec peut survenir après
+                # extraction partielle : on ne lève jamais cette
+                # erreur (elle ferait planter Actualise avec une
+                # fenêtre « Unhandled exception »), le zip est conservé
+                # pour retenter au prochain lancement, et
+                # ``build_installe`` n'est pas modifié tant que la
+                # bascule n'a pas réussi dans son intégralité.
+                try:
+                    mise_a_jour.extraire_zip(chemin_zip, repertoire_installation)
+                    mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
+                except OSError as erreur:
+                    _LOGGER.error(
+                        "Échec de l'extraction de la mise à jour de %s dans %s : %s "
+                        "(cause probable : droits insuffisants ou fichier en cours "
+                        "d'utilisation) — zip source conservé pour nouvelle tentative "
+                        "au prochain lancement.",
+                        prefixe,
+                        repertoire_installation,
+                        erreur,
+                    )
+                    continue
 
             bloc_config["build_installe"] = build_zip
             if prefixe == "actualise":
@@ -365,6 +389,8 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
         raise
 
 
+_NOM_FICHIER_CONFIG_ACTUALISE = "config_actualise.json"
+
 _GABARIT_UPDATER_BAT = """@echo off
 timeout /t 5 /nobreak > nul
 cd /d "{dossier_actualise}"
@@ -381,13 +407,16 @@ move "maj_bat\\_internal" "_internal"
 ren "Actualise.exe" "Actualise.exe.old"
 move "maj_bat\\Actualise.exe" "Actualise.exe"
 rmdir /s /q "maj_bat"
+powershell -NoProfile -Command "try {{ $p = '{chemin_config_actualise}'; $cfg = Get-Content -Raw -Path $p | ConvertFrom-Json; $cfg.build_installe = {build}; $json = $cfg | ConvertTo-Json -Depth 5; $tmp = $p + '.tmp'; [System.IO.File]::WriteAllText($tmp, $json, [System.Text.UTF8Encoding]::new($false)); Move-Item -Force $tmp $p }} catch {{ }}"
 del "{chemin_zip}"
 del "{chemin_flag}"
 if "%~1"=="--relancer" start "" "%~2"
 """
 
 
-def _generer_updater_bat(chemin_zip: Path, dossier_actualise: Path, chemin_flag: Path) -> Path:
+def _generer_updater_bat(
+    chemin_zip: Path, dossier_actualise: Path, chemin_flag: Path, build: int
+) -> Path:
     """Génère ``updater.bat`` dans ``dossier_actualise``, tous les
     chemins étant hardcodés au moment de la génération.
 
@@ -396,6 +425,23 @@ def _generer_updater_bat(chemin_zip: Path, dossier_actualise: Path, chemin_flag:
     ``_basculer_par_renommage``) : ce bat, lancé par ActualiseUI.exe une
     fois Actualise fermé, effectue la bascule à sa place. Retourne le
     chemin du bat généré.
+
+    Le bat réécrit aussi ``build_installe`` dans ``config_actualise.json``
+    (``{build}``, le build réellement extrait) une fois la bascule
+    effective — voir issue #66 : auparavant, ce chemin de mise à jour ne
+    touchait jamais cette valeur, faisant retélécharger indéfiniment la
+    même version. L'écriture se fait volontairement *après* le
+    remplacement de ``Actualise.exe``/``_internal`` et *avant* la
+    suppression du zip source : si le bat est interrompu avant
+    l'écriture, le zip reste considéré comme en attente et la bascule
+    sera retentée au prochain lancement (pas de perte) ; s'il est
+    interrompu après, le zip restant serait de toute façon vu comme un
+    résidu obsolète (``build`` ≤ ``build_installe``) puisque la bascule a
+    déjà eu lieu. Écrit via ``[System.IO.File]::WriteAllText`` avec un
+    ``UTF8Encoding($false)`` explicite pour garantir l'absence de BOM
+    (même convention que ``config._ecrire_json_atomique``), puis bascule
+    par ``Move-Item -Force`` (équivalent de l'écriture atomique
+    ``os.replace`` déjà utilisée côté Python).
     """
     chemin_bat = dossier_actualise / "updater.bat"
     chemin_bat.write_text(
@@ -403,6 +449,8 @@ def _generer_updater_bat(chemin_zip: Path, dossier_actualise: Path, chemin_flag:
             dossier_actualise=dossier_actualise,
             chemin_zip=chemin_zip,
             chemin_flag=chemin_flag,
+            chemin_config_actualise=dossier_actualise / _NOM_FICHIER_CONFIG_ACTUALISE,
+            build=build,
         ),
         encoding="utf-8",
     )
@@ -492,7 +540,7 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
                         / _NOM_FLAG_MAJ_ACTUALISE
                     )
                     chemin_bat = _generer_updater_bat(
-                        chemin_zone_attente, config.chemin_config_portable(), chemin_flag
+                        chemin_zone_attente, config.chemin_config_portable(), chemin_flag, build_distant
                     )
                     _ecrire_flag_maj(
                         Path(configuration["application_cible"]["repertoire_installation"]),
