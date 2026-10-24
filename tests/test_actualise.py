@@ -5,17 +5,28 @@ et les fonctions des autres modules (``config``, ``mise_a_jour``,
 ``version_check``, ``notifications``) sont simulés via
 ``unittest.mock``. Voir CONCEPTION.md, « Séquence de démarrage —
 vérification non bloquante » et « Garde-fou anti-boucle infinie ».
+
+Exception à cette règle : ``TestGabaritUpdaterBat`` (issue #68) exécute
+réellement le ``updater.bat`` généré par ``_generer_updater_bat`` dans
+un dossier temporaire — un script batch ne peut être vérifié qu'en le
+lançant pour de vrai. Ces tests ne font aucun appel réseau et ne sont
+actifs que sous Windows (``os.name == "nt"``).
 """
 
 import json
 import logging
+import os
+import shutil
+import subprocess
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import call, patch
 
 from actualise import (
+    _generer_updater_bat,
     appliquer_mises_a_jour_en_attente,
     configurer_logging,
     main,
@@ -529,6 +540,209 @@ class TestMain(unittest.TestCase):
             with self.assertNoLogs("actualise", level="ERROR"):
                 with self.assertRaises(SystemExit):
                     main(["--config", "scrabble"])
+
+
+def _creer_installation_actualise(dossier: Path) -> None:
+    """Pose une fausse installation d'Actualise (3 éléments bascules
+    par le bat + config_actualise.json) dans ``dossier``, tous marqués
+    « ancien » pour pouvoir distinguer un remplacement réussi."""
+    (dossier / "Actualise.exe").write_text("ancien-actualise-exe", encoding="utf-8")
+    (dossier / "ActualiseUI.exe").write_text("ancien-actualise-ui-exe", encoding="utf-8")
+    dossier_internal = dossier / "_internal"
+    dossier_internal.mkdir()
+    (dossier_internal / "lib.dll").write_text("ancien", encoding="utf-8")
+    (dossier / "config_actualise.json").write_text(
+        json.dumps({"build_installe": 10}), encoding="utf-8"
+    )
+
+
+def _creer_zip_mise_a_jour(chemin_zip: Path) -> None:
+    """Archive de mise à jour valide, plate, avec les 3 éléments bascules
+    par le bat marqués « nouveau »."""
+    with zipfile.ZipFile(chemin_zip, "w") as archive:
+        archive.writestr("manifest.json", json.dumps({"supprimer": []}))
+        archive.writestr("_internal/lib.dll", "nouveau")
+        archive.writestr("Actualise.exe", "nouveau-actualise-exe")
+        archive.writestr("ActualiseUI.exe", "nouveau-actualise-ui-exe")
+
+
+@unittest.skipUnless(os.name == "nt", "updater.bat est un script Windows (cmd.exe)")
+class TestGabaritUpdaterBat(unittest.TestCase):
+    """Exécute réellement ``updater.bat`` (voir issue #68) dans un
+    dossier temporaire : succès, fichier verrouillé, zip invalide,
+    attente puis abandon si Actualise.exe tourne encore.
+    """
+
+    def setUp(self):
+        self.dossier_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dossier_temp.cleanup)
+        self.dossier_actualise = Path(self.dossier_temp.name) / "actualise_install"
+        self.dossier_actualise.mkdir()
+        _creer_installation_actualise(self.dossier_actualise)
+
+        self.chemin_zip = self.dossier_actualise / "actualise_11.zip"
+        self.chemin_flag = self.dossier_actualise / "actualise_update.flag"
+        self.chemin_flag.write_text("{}", encoding="utf-8")
+        self.chemin_config = self.dossier_actualise / "config_actualise.json"
+
+    def _executer_bat(self, build=11, max_attente=3, timeout=60):
+        chemin_bat = _generer_updater_bat(
+            self.chemin_zip, self.dossier_actualise, self.chemin_flag, build
+        )
+        env = dict(os.environ)
+        env["ACTUALISE_UPDATER_MAX_ATTENTE"] = str(max_attente)
+        subprocess.run(
+            ["cmd", "/c", str(chemin_bat)],
+            cwd=self.dossier_actualise,
+            env=env,
+            timeout=timeout,
+            capture_output=True,
+        )
+
+    def _journal(self) -> str:
+        chemin_log = self.dossier_actualise / "updater.log"
+        return chemin_log.read_text(encoding="utf-8") if chemin_log.exists() else ""
+
+    def _assert_installation_inchangee(self):
+        self.assertEqual(
+            (self.dossier_actualise / "Actualise.exe").read_text(encoding="utf-8"),
+            "ancien-actualise-exe",
+        )
+        self.assertEqual(
+            (self.dossier_actualise / "ActualiseUI.exe").read_text(encoding="utf-8"),
+            "ancien-actualise-ui-exe",
+        )
+        self.assertEqual(
+            (self.dossier_actualise / "_internal" / "lib.dll").read_text(encoding="utf-8"),
+            "ancien",
+        )
+        self.assertEqual(
+            json.loads(self.chemin_config.read_text(encoding="utf-8"))["build_installe"], 10
+        )
+        self.assertFalse((self.dossier_actualise / "_internal.old").exists())
+        self.assertFalse((self.dossier_actualise / "Actualise.exe.old").exists())
+        self.assertFalse((self.dossier_actualise / "ActualiseUI.exe.old").exists())
+
+    def test_succes_remplace_les_trois_elements_et_finalise(self):
+        _creer_zip_mise_a_jour(self.chemin_zip)
+
+        self._executer_bat(build=11)
+
+        self.assertEqual(
+            (self.dossier_actualise / "Actualise.exe").read_text(encoding="utf-8"),
+            "nouveau-actualise-exe",
+        )
+        self.assertEqual(
+            (self.dossier_actualise / "ActualiseUI.exe").read_text(encoding="utf-8"),
+            "nouveau-actualise-ui-exe",
+        )
+        self.assertEqual(
+            (self.dossier_actualise / "_internal" / "lib.dll").read_text(encoding="utf-8"),
+            "nouveau",
+        )
+        self.assertEqual(
+            json.loads(self.chemin_config.read_text(encoding="utf-8"))["build_installe"], 11
+        )
+        self.assertFalse(self.chemin_zip.exists())
+        self.assertFalse(self.chemin_flag.exists())
+        self.assertFalse((self.dossier_actualise / "_internal.old").exists())
+        self.assertFalse((self.dossier_actualise / "Actualise.exe.old").exists())
+        self.assertFalse((self.dossier_actualise / "ActualiseUI.exe.old").exists())
+        journal = self._journal()
+        self.assertIn("Bascule reussie", journal)
+        self.assertIn("build_installe reecrit", journal)
+        self.assertIn("succes", journal)
+
+    def test_zip_invalide_ne_modifie_rien(self):
+        self.chemin_zip.write_bytes(b"ceci n'est pas un zip valide")
+
+        self._executer_bat(build=11)
+
+        self._assert_installation_inchangee()
+        self.assertTrue(self.chemin_zip.exists())
+        self.assertTrue(self.chemin_flag.exists())
+        self.assertIn("ECHEC", self._journal())
+        self.assertIn("extraction", self._journal())
+
+    def test_fichier_verrouille_restaure_l_etat_initial(self):
+        # _internal est bascule avant Actualise.exe (ordre du gabarit) :
+        # verrouiller Actualise.exe exerce donc le rollback d'un element
+        # deja bascule (_internal), pas seulement une annulation a vide.
+        _creer_zip_mise_a_jour(self.chemin_zip)
+        chemin_exe = self.dossier_actualise / "Actualise.exe"
+
+        processus_verrou = subprocess.Popen(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"$fs = [System.IO.File]::Open('{chemin_exe}', 'Open', 'ReadWrite', 'None'); "
+                "Start-Sleep -Seconds 8; $fs.Close()",
+            ]
+        )
+        try:
+            time.sleep(1)
+            self._executer_bat(build=11)
+        finally:
+            processus_verrou.wait(timeout=15)
+
+        self._assert_installation_inchangee()
+        self.assertTrue(self.chemin_zip.exists())
+        self.assertTrue(self.chemin_flag.exists())
+        journal = self._journal()
+        self.assertIn("verrouille", journal)
+        self.assertIn("restauree dans son etat initial", journal)
+
+    def test_abandon_si_actualise_exe_tourne_encore(self):
+        _creer_zip_mise_a_jour(self.chemin_zip)
+
+        dossier_faux_process = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, dossier_faux_process, True)
+        chemin_faux_exe = dossier_faux_process / "Actualise.exe"
+        shutil.copy(r"C:\Windows\System32\ping.exe", chemin_faux_exe)
+
+        processus = subprocess.Popen(
+            [str(chemin_faux_exe), "-n", "8", "127.0.0.1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            time.sleep(1)
+            self._executer_bat(build=11, max_attente=2)
+        finally:
+            processus.wait(timeout=15)
+
+        self._assert_installation_inchangee()
+        self.assertTrue(self.chemin_zip.exists())
+        self.assertTrue(self.chemin_flag.exists())
+        self.assertFalse((self.dossier_actualise / "maj_bat").exists())
+        self.assertIn("ABANDON", self._journal())
+
+    def test_attend_la_fin_du_processus_puis_termine_avec_succes(self):
+        _creer_zip_mise_a_jour(self.chemin_zip)
+
+        dossier_faux_process = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, dossier_faux_process, True)
+        chemin_faux_exe = dossier_faux_process / "ActualiseUI.exe"
+        shutil.copy(r"C:\Windows\System32\ping.exe", chemin_faux_exe)
+
+        processus = subprocess.Popen(
+            [str(chemin_faux_exe), "-n", "3", "127.0.0.1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            self._executer_bat(build=11, max_attente=15)
+        finally:
+            processus.wait(timeout=15)
+
+        self.assertEqual(
+            json.loads(self.chemin_config.read_text(encoding="utf-8"))["build_installe"], 11
+        )
+        self.assertFalse(self.chemin_zip.exists())
+        journal = self._journal()
+        self.assertIn("Bascule reussie", journal)
+        self.assertNotIn("ABANDON", journal)
 
 
 if __name__ == "__main__":
