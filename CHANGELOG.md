@@ -1,5 +1,157 @@
 # Changelog — issue #57
 
+# Changelog — issue #71
+
+## Issue #71 — build\rebuild_actualise.bat : refuse un numéro de build invalide ou déjà publié
+
+- **Garde-fou étape 1** : `--build N` est désormais refusé, avant toute
+  copie/construction/écriture, si `N` n'est pas un entier strictement
+  supérieur au build courant de `version.json`, quel que soit le mode
+  (avec ou sans `--publier`) — la copie vers le dossier fixe
+  `C:\CCW_Share\_derniers_builds\actualise\` a lieu dans les deux cas.
+  Message d'erreur indiquant le numéro demandé, le build courant et la
+  règle ; code de sortie non nul.
+- **`--build` sans valeur** (ou suivi d'un autre argument reconnaissable
+  comme non numérique) est refusé avec un message explicite, au lieu
+  d'être ignoré silencieusement (le script ne retombe plus sur le numéro
+  automatique sans le dire).
+- **Argument inconnu** refusé avec la liste des arguments acceptés
+  (`--publier`, `--build N`), au lieu d'un simple avertissement suivi
+  d'une construction sans publication.
+- **Commentaire d'en-tête** décrivant `--build` mis à jour pour indiquer
+  la règle de numéro strictement croissant et le refus des arguments
+  invalides.
+- **Essais réalisés** (PowerShell, depuis la racine du worktree) :
+  refus rapides et sans écriture pour `--build 11` (égal au build
+  publié), `--build 10` (inférieur), `--build abc` (non numérique),
+  `--build` seul (sans valeur), `--publier --build 11` (déjà publié,
+  avec publication), et un argument inconnu (`--publierX`) — les six cas
+  sortent avec un code 1 avant toute construction, `version.json`
+  inchangé (`git diff` vide) et rien de nouveau dans
+  `installeur\output`. Essai accepté sans `--publier` avec `--build 99`
+  (numéro fictif, jamais utilisé en publication) : installeur et archive
+  construits avec succès, copiés dans `installeur\output\` du worktree
+  et dans le dossier fixe du partage — fichiers à supprimer à la main
+  par Alain. `version.json` reste inchangé dans toute cette issue
+  (aucun `--publier` utilisé pendant les essais).
+
+# Changelog — issue #70
+
+## Issue #70 — Renomme le script de build unifié en rebuild_actualise.bat et retire les anciens scripts
+
+- **Renommage** : `build\rebuild_actualise_unifie.bat` (issue #67) devient
+  `build\rebuild_actualise.bat`. L'ancien `rebuild_actualise.bat` (build
+  d'`Actualise.exe` seul, sans installeur ni archive) est supprimé
+  d'abord. En-tête et messages d'aide réécrits pour décrire le script tel
+  qu'il est, sans « provisoire » ni mention des anciens scripts.
+- **Suppression** de `build\rebuild_actualise_setup.bat` et de
+  `build\publier_actualise.bat` (leurs fonctions sont couvertes par le
+  script unique depuis l'issue #67).
+- **Références nettoyées** : `.gitignore` (note sur `git add -f`,
+  réduite à l'unique script restant), `installeur\actualise.iss`
+  (commentaire de compilation, mention VM/VirtualBox/VBOXSVR remplacée
+  par une description du staging local). `actualise.spec` citait déjà le
+  nom définitif, aucun changement nécessaire.
+- **Essai réalisé** sans `--publier`, avec `--build 99` (numéro fictif,
+  jamais utilisé en publication) : installeur et archive construits avec
+  succès, copiés dans `installeur\output\` du worktree et dans
+  `C:\CCW_Share\_derniers_builds\actualise\` ; structure de l'archive
+  identique à la Release v11 (31 entrées, 4 éléments à la racine) ;
+  `version.json` inchangé (vérifié par `git diff` vide).
+- **Fonctions des anciens scripts non reprises dans le script unique**
+  (signalées, non corrigées dans cette issue) : construction d'
+  `Actualise.exe` seul avec recopie de `dist\` (ancien
+  `rebuild_actualise.bat`), recopie de `dist\Actualise` et
+  `dist\ActualiseUI.exe` vers le worktree (ancien
+  `rebuild_actualise_setup.bat`), et refus d'un numéro de build
+  inférieur ou égal à celui de `version.json` lors de la publication
+  (ancien `publier_actualise.bat`).
+
+Fichiers de test (build 99) laissés dans
+`C:\CCW_Share\_derniers_builds\actualise\` : à supprimer à la main par
+Alain, hors du périmètre de l'agent.
+
+# Changelog — issue #68
+
+## Issue #68 — updater.bat fiabilisé : attente réelle, contrôle de chaque étape, journal, ActualiseUI.exe basculé
+
+Contexte : aucun incident constaté (observation réelle v10→v11 confirmant
+que le bat avait fonctionné correctement) — issue préventive, basée sur la
+lecture du gabarit `_GABARIT_UPDATER_BAT` (`actualise.py`), inchangé depuis
+la v10.
+
+- **Attente réelle des processus** : le bat scrute désormais `tasklist`
+  pour `Actualise.exe` et `ActualiseUI.exe` (toutes les secondes, limite
+  30 s par défaut, surchargeable par la variable d'environnement
+  `ACTUALISE_UPDATER_MAX_ATTENTE` — utilisé par les tests pour rester
+  rapides) au lieu d'un délai fixe de 5 s. Si l'un des deux tourne encore
+  à l'échéance, le bat abandonne **sans rien modifier**.
+- **Chaque étape contrôlée** (extraction, renommage, déplacement) pour les
+  trois éléments `_internal`, `Actualise.exe` et `ActualiseUI.exe` (ce
+  dernier n'était jamais remplacé par l'ancien gabarit — constaté sur le
+  PC utilisateur : `ActualiseUI.exe` gardait la date du build 10 après une
+  mise à jour vers la v11). Tout échec restaure l'installation dans son
+  état initial (annulation dans l'ordre inverse des étapes déjà
+  effectuées), conserve le zip et ne touche jamais `build_installe`.
+- **Déplacement toujours vers un nom libéré** : chaque élément est
+  renommé en `.old` avant que le nouveau ne soit déplacé à sa place —
+  jamais un déplacement direct vers un nom de dossier encore existant.
+  Hypothèse de l'issue **confirmée** par un test manuel direct sur ce
+  PC : `move` d'un dossier vers un dossier de même nom déjà présent place
+  le premier **à l'intérieur** du second au lieu de le remplacer. Avec le
+  renommage préalable, ce cas ne peut plus se produire.
+- **`build_installe` réécrit, puis zip et flag supprimés, seulement après
+  bascule confirmée** des trois éléments — jamais avant, jamais en cas
+  d'échec (déjà vrai pour `build_installe` depuis l'issue #66, mais pas
+  pour l'ordre entre bascule et suppression du zip/flag en cas d'échec
+  partiel après extraction).
+- **Journal `updater.log`**, dans le dossier d'Actualise, une ligne
+  horodatée par étape/échec/abandon ; tronqué aux 200 dernières lignes
+  dès qu'il dépasse 100 Ko pour rester borné d'une exécution à l'autre.
+- **Chemin de bascule par renommage silencieuse (`_basculer_par_renommage`,
+  garde-fou anti-boucle infinie) vérifié** : il ne présente **pas** le même
+  défaut. `ActualiseUI.exe` y est déjà basculé correctement (boucle
+  générique sur tous les fichiers extraits, `Actualise.exe` étant le seul
+  cas particulier nécessitant le renommage en deux temps) ; tout `OSError`
+  (fichier verrouillé) y est déjà intercepté sans toucher
+  `build_installe` ni supprimer le zip. Rien à corriger sur ce chemin.
+- **Rôle ni déclenchement du bat inchangés** : toujours généré par
+  `tache_verification_arriere_plan`, toujours lancé par
+  `ActualiseUI.exe`/l'application cible via le flag, toujours relancé via
+  `--relancer` en cas de succès.
+
+### Tests ajoutés (`tests/test_actualise.py`, classe `TestGabaritUpdaterBat`)
+
+Exécution réelle du `updater.bat` généré (pas de mock) dans un dossier
+temporaire, sur Windows (`os.name == "nt"`) :
+- succès : les trois éléments sont remplacés, `build_installe` passe à
+  11, zip et flag supprimés, journal contient les lignes de succès ;
+- zip invalide : rien n'est modifié (comparé à l'état initial), zip et
+  flag conservés, journal contient l'échec d'extraction ;
+- fichier verrouillé (`Actualise.exe` ouvert en exclusif par un
+  processus séparé pendant l'exécution du bat) : `_internal` déjà
+  basculé à ce stade est restauré, l'installation entière revient à son
+  état initial, journal contient le verrouillage et la restauration ;
+- processus `Actualise.exe`/`ActualiseUI.exe` encore en cours (simulé par
+  une copie renommée de `ping.exe`, détectée par `tasklist` comme tout
+  autre processus de ce nom) : abandon sans modification si le délai
+  maximal est dépassé, et bascule réussie si le processus se termine
+  avant l'échéance.
+
+### Limite rencontrée
+
+Le module `requests` (dépendance du projet, `requirements.txt`) n'est pas
+installé dans cet environnement d'exécution et aucun accès réseau n'est
+autorisé pour cette issue (`RESEAU: non`) : je n'ai pas pu l'installer.
+J'ai donc utilisé un stub local minimal de `requests` (placé hors du
+dépôt, uniquement dans `PYTHONPATH` pour la durée des tests, jamais
+committé) afin de pouvoir exécuter réellement la suite `pytest`
+existante et les nouveaux tests. Résultat : 25 tests passent, 2 échecs
+déjà présents avant mes modifications (confirmé par comparaison avec le
+code d'origine remis en place temporairement via `git stash` — fuite de
+handle de fichier de `logging` entre tests Windows, sans rapport avec
+cette issue, hors périmètre).
+
 ## Issue #69 — Mise à jour ETAT.md et TACHES.md après la publication d'Actualise v11
 
 - ETAT.md : « Versions publiées » passe de v10 à v11, précise que la
