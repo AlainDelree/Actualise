@@ -322,49 +322,13 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                         continue
 
                 mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
-            else:
-                # L'exécutable de l'application cible n'est en
-                # principe pas en cours d'exécution au moment de la
-                # bascule (contexte différent d'Actualise lui-même),
-                # mais l'extraction directe dans
-                # repertoire_installation peut malgré tout échouer :
-                # droits insuffisants (ex. Program Files sans
-                # élévation) ou fichier verrouillé parce que
-                # l'application tourne encore (elle lance Actualise à
-                # son démarrage) — voir issue #66. ``extractall``
-                # n'étant pas atomique, l'échec peut survenir après
-                # extraction partielle : on ne lève jamais cette
-                # erreur (elle ferait planter Actualise avec une
-                # fenêtre « Unhandled exception »), le zip est conservé
-                # pour retenter au prochain lancement, et
-                # ``build_installe`` n'est pas modifié tant que la
-                # bascule n'a pas réussi dans son intégralité.
-                try:
-                    mise_a_jour.extraire_zip(chemin_zip, repertoire_installation)
-                    mise_a_jour.appliquer_manifeste(manifest, repertoire_installation)
-                except OSError as erreur:
-                    _LOGGER.error(
-                        "Échec de l'extraction de la mise à jour de %s dans %s : %s "
-                        "(cause probable : droits insuffisants ou fichier en cours "
-                        "d'utilisation) — zip source conservé pour nouvelle tentative "
-                        "au prochain lancement.",
-                        prefixe,
-                        repertoire_installation,
-                        erreur,
-                    )
-                    continue
 
-            bloc_config["build_installe"] = build_zip
-            if prefixe == "actualise":
+                bloc_config["build_installe"] = build_zip
                 config.sauvegarder_config_actualise(
                     configuration["actualise"], configuration["zone_attente"]
                 )
-            else:
-                config.sauvegarder_config_app(nom_app, configuration["application_cible"])
+                chemin_zip.unlink()
 
-            chemin_zip.unlink()
-
-            if prefixe == "actualise":
                 # Une nouvelle version d'Actualise vient d'être installée :
                 # on relance la version fraîchement installée comme 2ème
                 # instance (marqueur --child), puis on termine ce process
@@ -374,6 +338,22 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                 # infinie ».
                 _relancer_en_enfant(nom_app)
                 raise SystemExit(0)
+            else:
+                # Un zip de jeu ne s'applique plus que via le bat généré
+                # ci-dessous, déclenché par le jeu lui-même à sa
+                # fermeture (voir CONCEPTION.md, issue #73) : jamais
+                # d'extraction directe ici (l'exécutable du jeu peut
+                # être en cours d'exécution — c'est précisément le cas
+                # normal, puisque c'est lui qui a lancé Actualise), et
+                # ``build_installe``/le zip ne sont jamais touchés tant
+                # que le bat n'a pas réussi dans son intégralité. Le
+                # ``manifest`` lu ci-dessus n'a servi ici qu'à valider
+                # que le zip est lisible et bien formé ; il n'est pas
+                # appliqué par le bat (voir
+                # ``_generer_updater_bat_jeu``).
+                _assurer_maj_jeu_en_attente(
+                    nom_app, bloc_config, repertoire_installation, chemin_zip, build_zip
+                )
     except KeyError:
         # Champ obligatoire manquant dans config_actualise.json ou
         # config_<nom_app>.json : cohérent avec le choix déjà acté pour
@@ -634,20 +614,345 @@ def _generer_updater_bat(
     return chemin_bat
 
 
-def _ecrire_flag_maj(repertoire_app_cible: Path, chemin_bat: Path, dossier_actualise: Path) -> None:
+def _ecrire_flag_maj(
+    repertoire_app_cible: Path, chemin_bat: Path, dossier_actualise: Path, type_maj: str
+) -> None:
     """Écrit ``actualise_update.flag`` dans le dossier d'installation de
     l'application cible.
 
     Détecté par l'application cible à son démarrage pour lancer
     ActualiseUI.exe, qui présente à l'utilisateur le choix d'appliquer
-    la mise à jour d'Actualise (voir CONCEPTION.md).
+    la mise à jour (voir CONCEPTION.md). ``type_maj`` (``"actualise"``
+    ou ``"jeu"``) est un champ facultatif, purement informationnel : le
+    code déjà déployé dans les jeux ne teste que l'existence du fichier
+    (son nom littéral), il ne lit ni n'exige ce champ — il ne sert qu'au
+    diagnostic humain (lecture du flag, journal).
     """
     chemin_flag = repertoire_app_cible / _NOM_FLAG_MAJ_ACTUALISE
     contenu = {
         "actualise_ui": str(dossier_actualise / "ActualiseUI.exe"),
         "bat": str(chemin_bat),
+        "type": type_maj,
     }
     chemin_flag.write_text(json.dumps(contenu, indent=4), encoding="utf-8")
+
+
+def _lister_entrees_racine_zip(chemin_zip: Path) -> list[str]:
+    """Liste les entrées de premier niveau (nom avant le premier ``/``)
+    d'un zip, sans doublons, dans leur ordre d'apparition dans l'archive.
+
+    Utilisé pour générer dynamiquement les blocs de bascule du bat de
+    mise à jour d'un jeu (``_generer_updater_bat_jeu``) : contrairement
+    au zip d'Actualise (toujours ``_internal``/``Actualise.exe``/
+    ``ActualiseUI.exe``, connus à l'avance), le contenu d'un zip de jeu
+    est arbitraire — il faut l'inspecter pour savoir quoi basculer.
+    Lève ``zipfile.BadZipFile`` si ``chemin_zip`` n'est pas un zip lisible
+    (laissé remonter tel quel à l'appelant, voir
+    ``_assurer_maj_jeu_en_attente``).
+    """
+    vues: set[str] = set()
+    entrees: list[str] = []
+    with zipfile.ZipFile(chemin_zip) as archive:
+        for membre in archive.namelist():
+            racine = membre.split("/", 1)[0]
+            if racine and racine not in vues:
+                vues.add(racine)
+                entrees.append(racine)
+    return entrees
+
+
+def _bloc_bascule_entree_jeu(indice: int, nom_entree: str) -> str:
+    """Génère le bloc batch qui bascule une entrée de premier niveau
+    (fichier ou dossier) du zip extrait vers le dossier d'installation
+    du jeu, via renommage puis déplacement — jamais un déplacement
+    direct vers un nom encore existant (voir ``_basculer_par_renommage``
+    pour la même règle côté Actualise). Toute erreur de renommage ou de
+    déplacement saute à ``:annuler``, après avoir restauré l'éventuelle
+    sauvegarde de cette entrée elle-même (les entrées précédentes,
+    marquées ``_OK_<indice>``, sont restaurées par ``:annuler``).
+    """
+    return (
+        f'rem --- Entree {indice} : {nom_entree} ---\n'
+        f'set "_OK_{indice}=0"\n'
+        f'set "_HADBACKUP_{indice}=0"\n'
+        f'if exist "{nom_entree}" (\n'
+        f'    ren "{nom_entree}" "{nom_entree}.maj_old"\n'
+        f"    if errorlevel 1 (\n"
+        f'        call :log "ECHEC : {nom_entree} verrouille, renommage impossible ; restauration."\n'
+        f"        goto :annuler\n"
+        f"    )\n"
+        f'    set "_HADBACKUP_{indice}=1"\n'
+        f")\n"
+        f'move /y "%EXTRACT_DIR%\\{nom_entree}" "{nom_entree}" >nul\n'
+        f"if errorlevel 1 (\n"
+        f'    call :log "ECHEC : impossible de deplacer {nom_entree} ; restauration."\n'
+        f'    if "!_HADBACKUP_{indice}!"=="1" ren "{nom_entree}.maj_old" "{nom_entree}"\n'
+        f"    goto :annuler\n"
+        f")\n"
+        f'set "_OK_{indice}=1"\n'
+    )
+
+
+def _bloc_annulation_entree_jeu(indice: int, nom_entree: str) -> str:
+    """Génère le bloc batch d'annulation (ordre inverse de la bascule)
+    pour une entrée déjà entièrement basculée (``_OK_<indice>==1``) :
+    supprime le nouveau contenu, restaure la sauvegarde si elle existait.
+    """
+    return (
+        f'if "!_OK_{indice}!"=="1" (\n'
+        f'    if exist "{nom_entree}\\" ( rmdir /s /q "{nom_entree}" ) else ( del /f /q "{nom_entree}" 2>nul )\n'
+        f'    if "!_HADBACKUP_{indice}!"=="1" ren "{nom_entree}.maj_old" "{nom_entree}"\n'
+        f")\n"
+    )
+
+
+def _bloc_nettoyage_backup_jeu(nom_entree: str) -> str:
+    """Génère le bloc batch qui supprime le reliquat ``<nom>.maj_old``
+    d'une entrée, qu'il s'agisse d'un fichier ou d'un dossier — utilisé
+    à la fois en nettoyage préalable (reliquat d'une tentative
+    précédente interrompue) et en nettoyage final après succès.
+    """
+    return (
+        f'if exist "{nom_entree}.maj_old\\" ( rmdir /s /q "{nom_entree}.maj_old" ) '
+        f'else if exist "{nom_entree}.maj_old" ( del /f /q "{nom_entree}.maj_old" )\n'
+    )
+
+
+_GABARIT_UPDATER_BAT_JEU = """@echo off
+setlocal enabledelayedexpansion
+cd /d "{dossier_jeu}"
+
+set "LOG=updater.log"
+set "ZIP={chemin_zip}"
+set "FLAG={chemin_flag}"
+set "CONFIG={chemin_config_app}"
+set "BUILD={build}"
+set "EXECUTABLE={executable_jeu}"
+set "EXTRACT_DIR=maj_bat"
+
+rem ACTUALISE_UPDATER_MAX_ATTENTE (secondes) : surchargeable par
+rem variable d'environnement pour les tests, sinon valeur par defaut.
+if not defined ACTUALISE_UPDATER_MAX_ATTENTE set "ACTUALISE_UPDATER_MAX_ATTENTE=30"
+
+rem Rotation du journal : évite une croissance illimitée sur plusieurs
+rem exécutions successives, en gardant un historique raisonnable.
+if exist "%LOG%" (
+    for %%A in ("%LOG%") do if %%~zA GTR 102400 (
+        powershell -NoProfile -Command "try {{ (Get-Content -LiteralPath '%LOG%' -Tail 200) | Set-Content -LiteralPath '%LOG%' -Encoding UTF8 }} catch {{ }}"
+    )
+)
+
+call :log "=== updater.bat (jeu) demarre (build cible %BUILD%) ==="
+
+rem 1) Attend reellement la fin du jeu lui-meme, de Actualise.exe et de
+rem    ActualiseUI.exe (qui peuvent verrouiller leurs fichiers respectifs)
+rem    avant de toucher a quoi que ce soit. Abandon sans aucune
+rem    modification si la limite de temps est atteinte.
+set "_ATTENTES=0"
+:attente_processus
+set "_ENCORE=0"
+tasklist /fi "imagename eq %EXECUTABLE%" 2>nul | findstr /i "%EXECUTABLE%" >nul && set "_ENCORE=1"
+tasklist /fi "imagename eq Actualise.exe" 2>nul | findstr /i "Actualise.exe" >nul && set "_ENCORE=1"
+tasklist /fi "imagename eq ActualiseUI.exe" 2>nul | findstr /i "ActualiseUI.exe" >nul && set "_ENCORE=1"
+if "%_ENCORE%"=="0" goto :processus_termines
+set /a _ATTENTES+=1
+if %_ATTENTES% GEQ %ACTUALISE_UPDATER_MAX_ATTENTE% (
+    call :log "ABANDON : le jeu, Actualise.exe ou ActualiseUI.exe tourne encore apres !_ATTENTES!s d'attente, bascule annulee, rien modifie."
+    goto :fin
+)
+timeout /t 1 /nobreak > nul
+goto :attente_processus
+:processus_termines
+
+rem Nettoyage des reliquats d'une tentative precedente, avant de
+rem recommencer (ne rien supposer sur leur presence).
+if exist "%EXTRACT_DIR%" rmdir /s /q "%EXTRACT_DIR%"
+{blocs_nettoyage_initial}
+rem 2) Extraction controlee : zip invalide/illisible = echec detecte,
+rem    rien n'est modifie, le zip est conserve pour une nouvelle
+rem    tentative au prochain declenchement.
+powershell -NoProfile -Command "try {{ Expand-Archive -LiteralPath '%ZIP%' -DestinationPath '%EXTRACT_DIR%' -Force; exit 0 }} catch {{ exit 1 }}"
+if errorlevel 1 (
+    call :log "ECHEC : extraction du zip impossible (zip invalide ou illisible) ; rien modifie, zip conserve."
+    rmdir /s /q "%EXTRACT_DIR%" 2>nul
+    goto :fin
+)
+if not exist "%EXTRACT_DIR%\\%EXECUTABLE%" (
+    call :log "ECHEC : %EXECUTABLE% absent de l'archive extraite ; rien modifie, zip conserve."
+    rmdir /s /q "%EXTRACT_DIR%" 2>nul
+    goto :fin
+)
+
+rem 3) Bascule de chaque entree de premier niveau du zip, chacune
+rem    controlee (renommage puis deplacement vers le nom libere - jamais
+rem    un deplacement direct vers un nom de dossier/fichier encore
+rem    existant, qui imbriquerait le contenu au lieu de le remplacer).
+rem    Tout echec declenche la restauration de ce qui a deja ete
+rem    bascule (ordre inverse).
+{blocs_bascule}
+goto :bascule_ok
+
+:annuler
+{blocs_annulation}call :log "Bascule annulee, installation restauree dans son etat initial ; zip conserve."
+rmdir /s /q "%EXTRACT_DIR%" 2>nul
+goto :fin
+
+:bascule_ok
+call :log "Bascule reussie : contenu du jeu remplace."
+rmdir /s /q "%EXTRACT_DIR%" 2>nul
+{blocs_nettoyage_final}
+rem 4) build_installe n'est reecrit qu'une fois la bascule des fichiers
+rem    effectivement reussie - jamais avant, jamais si elle a echoue.
+powershell -NoProfile -Command "try {{ $p = '%CONFIG%'; $cfg = Get-Content -Raw -Path $p | ConvertFrom-Json; $cfg.build_installe = %BUILD%; $json = $cfg | ConvertTo-Json -Depth 5; $tmp = $p + '.tmp'; [System.IO.File]::WriteAllText($tmp, $json, [System.Text.UTF8Encoding]::new($false)); Move-Item -Force $tmp $p; exit 0 }} catch {{ exit 1 }}"
+if errorlevel 1 (
+    call :log "ATTENTION : bascule des fichiers reussie mais echec de l'ecriture de build_installe dans %CONFIG%."
+    goto :fin
+)
+call :log "build_installe reecrit a %BUILD%."
+
+del /f "%ZIP%" 2>nul
+del /f "%FLAG%" 2>nul
+call :log "Zip et flag supprimes, mise a jour terminee avec succes."
+
+if "%~1"=="--relancer" start "" "%~2"
+
+:fin
+endlocal
+goto :eof
+
+:log
+>>"%LOG%" echo %date% %time% %~1
+exit /b 0
+"""
+
+
+def _generer_updater_bat_jeu(
+    chemin_zip: Path,
+    dossier_jeu: Path,
+    chemin_flag: Path,
+    chemin_config_app: Path,
+    executable_jeu: str,
+    build: int,
+    entrees_racine: list[str],
+) -> Path:
+    """Génère ``updater.bat`` dans ``dossier_jeu`` (dossier d'installation
+    de l'application cible), pour appliquer la mise à jour de ce jeu une
+    fois le jeu fermé.
+
+    Généralisation, pour une application cible quelconque, du mécanisme
+    ``_generer_updater_bat`` déjà en place pour Actualise lui-même (voir
+    CONCEPTION.md) : mêmes garanties (attente réelle des processus,
+    contrôle de chaque étape avec restauration de l'état initial, journal
+    ``updater.log``, ``build_installe`` réécrit seulement après succès),
+    mais généralisées à un contenu de zip arbitraire — chaque entrée de
+    premier niveau de l'archive (``entrees_racine``, déterminées par
+    l'appelant via ``_lister_entrees_racine_zip`` au moment de la
+    génération, jamais recalculées à l'exécution du bat) reçoit son
+    propre bloc de bascule renommage+déplacement, au lieu des trois noms
+    fixes (``_internal``, ``Actualise.exe``, ``ActualiseUI.exe``) connus
+    pour Actualise. Attend en plus la fin d'``executable_jeu`` lui-même
+    (Actualise n'avait jamais besoin d'attendre le jeu, puisqu'il ne
+    touche jamais à ses fichiers).
+
+    Ne traite pas ``manifest["supprimer"]`` : contrairement à l'ancienne
+    extraction directe (``mise_a_jour.extraire_zip`` +
+    ``mise_a_jour.appliquer_manifeste``, retirée de
+    ``appliquer_mises_a_jour_en_attente`` par cette même issue #73), ce
+    bat ne supprime aucun fichier au-delà de ceux remplacés par une
+    entrée de même nom présente dans le zip — limitation connue et
+    documentée (voir CONCEPTION.md et le rapport de l'issue #73),
+    ``manifest["supprimer"]`` n'étant pas mentionné par la tâche
+    demandée et son implémentation en batch générique ajoutant un risque
+    non négligeable pour un gain non démontré.
+    """
+    blocs_bascule = "".join(
+        _bloc_bascule_entree_jeu(indice, nom) for indice, nom in enumerate(entrees_racine)
+    )
+    blocs_annulation = "".join(
+        _bloc_annulation_entree_jeu(indice, nom)
+        for indice, nom in reversed(list(enumerate(entrees_racine)))
+    )
+    blocs_nettoyage = "".join(_bloc_nettoyage_backup_jeu(nom) for nom in entrees_racine)
+
+    chemin_bat = dossier_jeu / "updater.bat"
+    chemin_bat.write_text(
+        _GABARIT_UPDATER_BAT_JEU.format(
+            dossier_jeu=dossier_jeu,
+            chemin_zip=chemin_zip,
+            chemin_flag=chemin_flag,
+            chemin_config_app=chemin_config_app,
+            build=build,
+            executable_jeu=executable_jeu,
+            blocs_bascule=blocs_bascule,
+            blocs_annulation=blocs_annulation,
+            blocs_nettoyage_initial=blocs_nettoyage,
+            blocs_nettoyage_final=blocs_nettoyage,
+        ),
+        encoding="utf-8",
+    )
+    return chemin_bat
+
+
+def _assurer_maj_jeu_en_attente(
+    nom_app: str,
+    bloc_app: dict,
+    repertoire_installation: Path,
+    chemin_zip: Path,
+    build_zip: int,
+) -> None:
+    """Génère, si besoin, le bat + le flag de mise à jour pour
+    l'application cible (le « jeu »), généralisation du mécanisme
+    flag + updater.bat déjà en place pour Actualise lui-même (voir
+    CONCEPTION.md, section dédiée à la mise à jour d'un jeu).
+
+    Ne fait **rien** — zip conservé, aucune extraction, aucun nouveau
+    flag — si ``actualise_update.flag`` existe déjà dans
+    ``repertoire_installation`` : un seul type de mise à jour en attente
+    à la fois dans ce dossier (celle d'Actualise, traitée plus haut dans
+    la même boucle d'appel, passe donc toujours en premier ; celle du
+    jeu est alors reportée à un lancement ultérieur, une fois ce flag
+    consommé).
+
+    Appelée à la fois juste après le téléchargement
+    (``tache_verification_arriere_plan``, pour que le bat soit prêt avant
+    une éventuelle fermeture du jeu dans la même session) et à chaque
+    lancement suivant tant que le zip reste en attente
+    (``appliquer_mises_a_jour_en_attente``, qui rattrape une génération
+    ayant échoué précédemment — ``OSError``/``BadZipFile`` transitoire).
+    """
+    chemin_flag = repertoire_installation / _NOM_FLAG_MAJ_ACTUALISE
+    if chemin_flag.exists():
+        _LOGGER.info(
+            "Mise à jour de %s (build %s) reportée : un flag de mise à jour "
+            "est déjà en attente dans %s.",
+            nom_app,
+            build_zip,
+            repertoire_installation,
+        )
+        return
+
+    try:
+        entrees_racine = _lister_entrees_racine_zip(chemin_zip)
+        chemin_bat = _generer_updater_bat_jeu(
+            chemin_zip,
+            repertoire_installation,
+            chemin_flag,
+            config.chemin_config_portable() / f"config_{nom_app}.json",
+            bloc_app["executable"],
+            build_zip,
+            entrees_racine,
+        )
+        _ecrire_flag_maj(
+            repertoire_installation, chemin_bat, config.chemin_config_portable(), type_maj="jeu"
+        )
+    except (OSError, zipfile.BadZipFile) as erreur:
+        _LOGGER.error(
+            "Échec de la génération du bat/flag de mise à jour pour %s (build %s) : "
+            "%s — zip conservé pour nouvelle tentative.",
+            nom_app,
+            build_zip,
+            erreur,
+        )
 
 
 def _url_asset_release(depot_github: str, build: int, prefixe: str) -> str:
@@ -723,11 +1028,28 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
                         Path(configuration["application_cible"]["repertoire_installation"]),
                         chemin_bat,
                         config.chemin_config_portable(),
+                        type_maj="actualise",
                     )
                 except OSError:
                     _LOGGER.exception(
                         "Échec de la génération du bat/flag de mise à jour Actualise."
                     )
+            else:
+                # Mise à jour d'un jeu : le bat + le flag sont générés
+                # dès maintenant (comme pour Actualise ci-dessus), pour
+                # qu'ils soient prêts avant une éventuelle fermeture du
+                # jeu au cours de cette même session — voir
+                # CONCEPTION.md, issue #73. Ne fait rien si un flag est
+                # déjà en attente dans ce dossier (ex. mise à jour
+                # d'Actualise traitée juste au-dessus dans cette même
+                # itération : elle passe toujours en premier).
+                _assurer_maj_jeu_en_attente(
+                    nom_app,
+                    bloc_config,
+                    Path(bloc_config["repertoire_installation"]),
+                    chemin_zone_attente,
+                    build_distant,
+                )
 
             notifications.notifier_ntfy(
                 configuration["topic_ntfy"],

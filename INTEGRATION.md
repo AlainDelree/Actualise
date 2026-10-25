@@ -6,7 +6,9 @@ Guide pratique destiné à une conversation Claude qui intègre une nouvelle app
 
 ## 2. Architecture générale
 
-Actualise est une instance unique partagée entre toutes les applications cibles, installée dans `C:\Actualise\`. Chaque application cible a son propre fichier de configuration dans ce dossier. Actualise est lancé avec `--config <nom>` pour savoir quelle application gérer.
+Actualise est une instance unique partagée entre toutes les applications cibles, installée dans `C:\Actualise\`. Chaque application cible a son propre fichier de configuration dans ce dossier.
+
+**Qui lance Actualise, et quand.** Actualise n'est jamais lancé directement par l'utilisateur (aucun raccourci ne pointe vers lui) : c'est l'application cible elle-même qui le lance, dans son propre code, à son propre démarrage (avant l'ouverture de sa fenêtre principale), par un `subprocess.Popen` **non bloquant** — sans attendre sa fin, sans jamais bloquer son propre démarrage — et **seulement si `C:\Actualise\Actualise.exe` existe** sur la machine (sinon l'application démarre normalement, sans vérification de mise à jour). Voir §6 pour le code exact. Actualise sait quelle application cible gérer via l'argument obligatoire `--config <nom>` passé par ce même appel.
 
 ## 3. Checklist d'intégration pour un nouveau projet cible
 
@@ -20,7 +22,7 @@ Actualise est une instance unique partagée entre toutes les applications cibles
   - `_internal\` (dossier complet — jamais l'exe seul, incident réel : `Failed to load Python DLL` si `_internal\` manque)
   - `ActualiseUI.exe` (exécutable séparé, inclus dans `actualise-v<N>.zip`)
   - Déployer uniquement si la version embarquée est plus récente que celle déjà présente (InnoSetup gère ça nativement).
-- **Raccourci** Bureau pointant vers `C:\Actualise\Actualise.exe` avec l'argument `--config <nom>` (ex. `--config scrabble`). Ne jamais pointer vers l'exécutable de l'app cible directement.
+- **Raccourci** Bureau pointant vers l'exécutable de l'app cible **elle-même** (ex. `Scrabble.exe`), comme un raccourci Windows ordinaire — jamais vers `Actualise.exe`. C'est le code de l'app cible (voir §6) qui se charge de lancer `Actualise.exe --config <nom>` lui-même, à son propre démarrage.
 - **Icône du raccourci** : fichier `.ico` propre à l'app cible, même chemin dans `config_<nom>.json` (champ `icone`).
 - **Nettoyage de l'ancien dossier** : si `C:\Actualise_<NomApp>\` existe (ancienne architecture), le supprimer entièrement lors de l'installation.
 - **Désinstallation** : supprimer `config_<nom>.json` mais pas `C:\Actualise\` si d'autres `config_*.json` y existent encore.
@@ -61,9 +63,24 @@ Actualise est une instance unique partagée entre toutes les applications cibles
 
 ## 6. Intégration dans le code de l'application cible
 
-Deux ajouts dans le code de l'app, une seule fois, jamais à modifier ensuite.
+Trois ajouts dans le code de l'app, une seule fois, jamais à modifier ensuite.
 
-### Au démarrage (avant l'ouverture de la fenêtre)
+### Au démarrage, étape 1 : lancer Actualise
+
+Avant l'ouverture de la fenêtre principale, sans jamais attendre sa fin (`Popen` non bloquant) ni bloquer le démarrage de l'app si Actualise n'est pas installé :
+```python
+import subprocess
+from pathlib import Path
+
+_actualise = Path(r"C:\Actualise\Actualise.exe")
+if _actualise.exists():
+    subprocess.Popen([str(_actualise), "--config", "<nom>"])  # ex. "scrabble"
+```
+C'est cet appel, et lui seul, qui déclenche la vérification/téléchargement en arrière-plan d'une nouvelle version (d'Actualise lui-même et/ou de l'app cible) — voir CONCEPTION.md, « Séquence de démarrage ». Aucun raccourci ne pointe jamais vers `Actualise.exe` (voir §3) : c'est uniquement l'app cible, dans son propre code, qui le lance.
+
+### Au démarrage, étape 2 : détecter un flag déjà en attente
+
+Peut concerner **deux usages différents** du même flag — une mise à jour d'Actualise lui-même **ou** une mise à jour de l'app cible restée en attente d'un cycle précédent (ex. le PC a été éteint avant la fermeture normale de l'app, qui n'a donc jamais eu l'occasion de lancer le bat correspondant, voir CONCEPTION.md, « ActualiseUI.exe », cas limite dédié). Le code ci-dessous ne distingue pas les deux cas : le JSON du flag porte un champ `type` facultatif (`"actualise"` ou `"jeu"`), purement informationnel, que ce code **ignore** volontairement — seule l'existence du fichier compte :
 ```python
 import json
 import subprocess
@@ -84,6 +101,7 @@ if _flag.exists():
 ```
 
 ### À la fermeture de la fenêtre principale
+
 Adapter à la technologie UI utilisée (pywebview `window.events.closing`, tkinter `WM_DELETE_WINDOW`, etc.) :
 ```python
 def _handler_fermeture_actualise():
@@ -96,6 +114,7 @@ def _handler_fermeture_actualise():
         except Exception:
             pass
 ```
+Même remarque : ce gestionnaire s'applique indifféremment à une mise à jour d'Actualise ou de l'app elle-même — c'est le bat référencé par le flag (généré par Actualise selon le cas) qui sait quoi faire. Lancé sans argument comme ici, le bat n'essaie jamais de relancer quoi que ce soit une fois la bascule terminée (seul `ActualiseUI.exe` passe `--relancer`, à l'étape 2 ci-dessus).
 
 ## 7. Workflow de publication (build script)
 

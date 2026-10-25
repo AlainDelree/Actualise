@@ -12,9 +12,18 @@ dernière version stable d'une application Windows packagée en .exe
 
 Un exécutable séparé de l'application cible (contournement du problème
 classique : un .exe ne peut pas se remplacer lui-même pendant qu'il
-s'exécute). Le raccourci Bureau/menu Démarrer de l'utilisateur final
-pointe vers Actualise, jamais directement vers l'application cible —
-sinon la mise à jour ne se déclenche jamais.
+s'exécute). **Comportement réel actuel** (voir « Séquence de démarrage »
+ci-dessous, qui détaille le modèle « instance unique partagée » acté
+depuis l'issue #54) : le raccourci Bureau/menu Démarrer de l'utilisateur
+final pointe vers l'application cible elle-même (ex. `Scrabble.exe`),
+jamais vers Actualise — c'est l'application cible qui, à son propre
+démarrage, lance `Actualise.exe --config <nom>` par un `Popen` non
+bloquant (sans attendre sa fin, sans bloquer sa propre fenêtre), et
+seulement si `C:\Actualise\Actualise.exe` existe sur la machine (sinon
+elle démarre normalement, sans mise à jour). Ce lancement fait partie du
+code de l'application cible (voir INTEGRATION.md, §6) ; Actualise n'a
+donc jamais besoin d'être lancé directement par l'utilisateur, et ne
+lance lui-même aucune application cible.
 
 ## Format de version — `version.json`
 
@@ -352,27 +361,33 @@ arrière-plan puis se ferme, sans attendre une action de l'utilisateur.
 
 3. Au **lancement suivant** (prochain démarrage d'Actualise, déclenché
    par un nouveau lancement de l'application cible), avant toute autre
-   chose, Actualise applique les mises à jour mises en attente. Pour
-   chaque mise à jour en attente (Actualise ou application cible), la
-   bascule comprend :
-   1. **extraction du zip** téléchargé dans le dossier d'installation
-      (écrase les fichiers existants de même nom, ajoute les nouveaux) ;
-   2. **application du manifeste** : suppression des fichiers listés
-      dans `supprimer` (voir « Manifeste de mise à jour »).
-
-   Le détail selon qu'il s'agit d'Actualise lui-même ou de l'application
-   cible :
-   - si une nouvelle version d'Actualise est en attente, ces deux
-     étapes sont suivies d'un relancement d'Actualise comme **2ème
-     instance** de lui-même (la version fraîchement installée) avec le
-     **marqueur explicite** parent → enfant décrit ci-dessous, avant de
-     terminer le parent ; ces opérations restent locales (extraction de
-     zip, suppressions ciblées), donc quasi instantanées — elles ne
-     réintroduisent pas d'attente réseau perceptible ;
-   - si une nouvelle version de l'application cible est en attente, ces
-     deux étapes suffisent : Actualise n'a plus rien à lancer ensuite,
-     l'application cible tourne déjà dans sa version fraîchement mise à
-     jour dès son prochain démarrage.
+   chose, Actualise applique les mises à jour mises en attente
+   (`appliquer_mises_a_jour_en_attente`). Le détail diffère désormais
+   **fondamentalement** selon qu'il s'agit d'Actualise lui-même ou de
+   l'application cible (issue #73 — voir « ActualiseUI.exe » ci-dessous
+   pour le mécanisme complet de mise à jour d'un jeu) :
+   - **Actualise lui-même** : si une nouvelle version est en attente **et
+     qu'aucun flag `actualise_update.flag` n'est déjà présent**,
+     bascule immédiate et silencieuse — **extraction du zip** dans un
+     dossier temporaire, **bascule par renommage** vers le dossier
+     d'installation, puis **application du manifeste** (suppression des
+     fichiers listés dans `supprimer`, voir « Manifeste de mise à jour »)
+     — suivie d'un relancement d'Actualise comme **2ème instance** de
+     lui-même avec le **marqueur explicite** parent → enfant décrit
+     ci-dessous, avant de terminer le parent ; ces opérations restent
+     locales, donc quasi instantanées — elles ne réintroduisent pas
+     d'attente réseau perceptible. Si un flag est déjà présent, cette
+     bascule silencieuse est sautée : le bat/la fenêtre a la main
+     exclusive (voir « ActualiseUI.exe »).
+   - **Application cible (un jeu)** : **jamais** d'extraction directe,
+     quel que soit l'état du flag — un zip de jeu ne s'applique plus que
+     via le bat généré pour lui (voir « ActualiseUI.exe »), déclenché
+     par le jeu lui-même à sa fermeture. Si aucun flag n'est déjà
+     présent dans son dossier d'installation, Actualise se contente ici
+     de (re)générer ce bat + le flag correspondant si besoin (retry en
+     cas d'échec transitoire de génération à un cycle précédent) ;
+     `build_installe` et le zip ne sont modifiés/supprimés que par le
+     bat, jamais ici.
 
 **Choix écarté : liste de fichiers attendus post-extraction.** Une
 vérification de type « liste des fichiers attendus après extraction du
@@ -472,10 +487,26 @@ directement le zip d'Actualise dans son propre dossier d'installation
 (`repertoire_installation`, celui de l'exécutable en cours
 d'exécution), ce qui échoue sous Windows avec `PermissionError [Errno
 13]` — un `.exe` en cours d'exécution ne peut pas être réécrit en
-place, seulement renommé. Ce point ne concernait que la mise à jour
-d'Actualise lui-même (`prefixe == "actualise"`) : l'application cible
-n'a pas son exécutable en cours d'exécution au moment de la bascule,
-donc son extraction directe reste inchangée et sans risque.
+place, seulement renommé.
+
+**Correction (issue #73)** : ce paragraphe affirmait jusqu'ici que « ce
+point ne concernait que la mise à jour d'Actualise lui-même... l'application
+cible n'a pas son exécutable en cours d'exécution au moment de la
+bascule, donc son extraction directe reste inchangée et sans risque ».
+C'était **faux**, et le diagnostic de l'issue #72 l'a confirmé en
+production : l'application cible lance elle-même `Actualise.exe
+--config <nom>` par un `Popen` non bloquant **à son propre démarrage**,
+puis continue de tourner sans l'attendre (voir « Principe de
+fonctionnement ») — son exécutable est donc, dans le cas normal,
+**toujours** en cours d'exécution pendant qu'Actualise tente d'appliquer
+sa mise à jour. L'extraction directe (`extractall`) échouait alors
+silencieusement (fichiers verrouillés par Windows), le zip restant
+indéfiniment en zone d'attente, retéléchargé à chaque lancement sans
+jamais s'appliquer. Ce bug est corrigé (issue #73) par le mécanisme flag
++ bat généralisé décrit dans « ActualiseUI.exe — dialogue de mise à jour
+côté utilisateur final » ci-dessous : un zip d'application cible ne
+s'applique plus jamais par extraction directe au démarrage, seulement
+via un bat dédié, déclenché à la fermeture du jeu.
 
 Pour Actualise lui-même, la bascule suit désormais ce mécanisme :
 
@@ -565,10 +596,106 @@ Déroulé :
    jour lui-même, sans interface, comme avant l'introduction
    d'`ActualiseUI.exe`.
 
-Ce mécanisme concerne **exclusivement** la mise à jour d'Actualise
-lui-même : la mise à jour d'une application cible n'a jamais eu besoin
-de ce contournement (son exécutable n'est pas en cours d'exécution au
-moment de la bascule, voir « Garde-fou anti-boucle infinie »).
+**Généralisation à la mise à jour d'un jeu (issue #73).** Le mécanisme
+ci-dessus ne concernait à l'origine que la mise à jour d'Actualise
+lui-même ; le diagnostic de l'issue #72 a établi qu'il doit en réalité
+**aussi** s'appliquer à la mise à jour d'une application cible, pour la
+même raison fondamentale : son exécutable est, en usage normal,
+**toujours en cours d'exécution** au moment où Actualise voudrait
+appliquer sa mise à jour (c'est elle qui vient de lancer Actualise, voir
+la correction apportée à « Principe de fonctionnement » et à
+« Garde-fou anti-boucle infinie » ci-dessus). Une extraction directe au
+démarrage échoue donc systématiquement (fichiers verrouillés), sans
+jamais être retentée ni à la fermeture du jeu ni plus tard — c'est le
+bug corrigé par cette généralisation. Un jeu ne s'auto-met-à-jour donc
+plus jamais par extraction directe : **uniquement** via ce même
+mécanisme flag + bat, moyennant les adaptations suivantes :
+
+- **Même fichier flag**, `actualise_update.flag`, même nom, même
+  dossier (`repertoire_installation` de l'application cible) : c'est la
+  seule chose que le code déjà déployé dans les jeux teste (son nom
+  littéral), ils ne savent donc pas distinguer les deux usages — d'où un
+  champ facultatif `type` (`"actualise"` ou `"jeu"`) ajouté au JSON du
+  flag, purement informationnel (diagnostic humain), que ce code
+  existant ignore totalement.
+- **Un seul flag à la fois, par dossier.** Le nom de fichier étant
+  identique pour les deux usages, un seul type de mise à jour peut être
+  en attente de validation/bascule dans le dossier d'une application
+  cible donnée à un instant donné. Si le zip d'Actualise **et** celui du
+  jeu sont tous deux détectés au même cycle de vérification, Actualise
+  occupe le flag en premier (ordre de traitement des cibles) ; la mise à
+  jour du jeu est alors reportée à un cycle ultérieur, une fois ce flag
+  consommé par le bat d'Actualise.
+- **Bat généré dynamiquement selon le contenu du zip**, et non plus
+  pour trois noms fixes connus à l'avance (`_internal`/`Actualise.exe`/
+  `ActualiseUI.exe`) : Actualise inspecte le zip du jeu au moment de la
+  génération (`_lister_entrees_racine_zip`) et génère un bloc de bascule
+  renommage+déplacement pour chacune de ses entrées de premier niveau
+  (fichiers ou dossiers), avec les mêmes garanties (jamais de
+  déplacement direct vers un nom encore existant, restauration complète
+  de l'état initial au moindre échec, dans l'ordre inverse des éléments
+  déjà basculés). `manifest["supprimer"]` n'est en revanche **pas**
+  appliqué par ce bat (contrairement à l'ancienne extraction directe
+  qu'il remplace) : limitation connue, non demandée par l'issue #73, le
+  risque d'une implémentation batch générique de suppressions ciblées
+  n'étant pas jugé proportionné à un besoin non démontré pour un jeu.
+- **Attente étendue au jeu lui-même.** Le bat attend la fin non
+  seulement de `Actualise.exe`/`ActualiseUI.exe`, mais aussi de
+  l'exécutable du jeu (champ `executable` de `config_<nom>.json`), avec
+  la même limite de temps et le même abandon sans aucune modification
+  si cette limite est atteinte.
+- **Pas de relance automatique à la fermeture normale.** Quand le
+  gestionnaire de fermeture du jeu (INTEGRATION.md, §6) lance le bat
+  directement (sans argument), celui-ci n'essaie jamais de relancer le
+  jeu — comportement hérité tel quel du gabarit d'Actualise (`if
+  "%~1"=="--relancer" start "" "%~2"`), qui ne s'active que si le bat
+  reçoit explicitement `--relancer <exe>`.
+- **Cas `--relancer` (fenêtre affichée pendant que le jeu tourne
+  encore).** Le seul appelant qui passe `--relancer` est
+  `ActualiseUI.exe`, lui-même lancé par le code de **démarrage** du jeu
+  (INTEGRATION.md, §6) — jamais par le gestionnaire de fermeture. Cela
+  ne peut donc se produire que si le flag a **survécu jusqu'au
+  démarrage suivant** du jeu (voir cas limite ci-dessous) : la fenêtre
+  de choix s'affiche alors que le jeu est déjà en train de démarrer (et
+  continue, sans jamais attendre la fenêtre). Si l'utilisateur clique
+  sur « Mettre à jour » à ce moment, le bat est lancé avec `--relancer
+  <exe du jeu>` alors que le jeu tourne encore : il attend sa fermeture
+  comme n'importe quel autre cas, puis le relance automatiquement une
+  fois la bascule terminée — symétrique du comportement déjà existant
+  pour Actualise lui-même (relance de l'application cible après la
+  bascule d'Actualise).
+- **Cas limite : le flag survit jusqu'au démarrage suivant du jeu**
+  (ex. extinction du PC avant la fermeture normale du jeu, qui n'a donc
+  jamais eu l'occasion de lancer le bat). Le code de démarrage du jeu
+  (INTEGRATION.md, §6) relance alors `ActualiseUI.exe` sans savoir que
+  le jeu est déjà en cours de démarrage :
+  - **« Plus tard »** : ferme simplement la fenêtre, flag conservé —
+    aucune perte, le choix sera reproposé au prochain démarrage (ou
+    appliqué à la fermeture normale de cette session-ci, comme dans le
+    cas courant).
+  - **« Mettre à jour »** : le flag est supprimé **avant** le
+    lancement du bat (`actualise_ui.py`, fonction `mettre_a_jour`) —
+    si le bat n'aboutit pas (le jeu met plus longtemps à se fermer que
+    la limite de temps du bat, par défaut 30s, probablement insuffisant
+    pour une session de jeu en cours), il abandonne **sans rien
+    modifier**, et la mise à jour n'est alors plus associée à aucun
+    flag. Elle n'est cependant **pas perdue** : le zip reste en zone
+    d'attente, `build_installe` est inchangé, et `_assurer_maj_jeu_en_attente`
+    régénère un nouveau bat + flag dès le **prochain lancement** du jeu
+    (que ce soit via `tache_verification_arriere_plan`, qui retélécharge
+    et retente à chaque cycle tant que la mise à jour n'est pas
+    installée, ou via `appliquer_mises_a_jour_en_attente` au lancement
+    suivant) — au prix d'un redémarrage supplémentaire avant que la
+    mise à jour s'applique réellement, mais sans aucune perte
+    définitive. Ce comportement n'a pas été modifié par l'issue #73 :
+    il découle directement de la réutilisation du mécanisme existant
+    (flag supprimé avant lancement du bat, décision actée pour Actualise
+    dès l'issue #36) et n'est pas trivial à corriger sans toucher au
+    code déjà déployé dans les jeux (hors périmètre de cette issue).
+
+Ce mécanisme sert donc désormais **à la fois** à la mise à jour
+d'Actualise lui-même et à celle d'une application cible — toujours un
+seul flag à la fois par dossier, jamais les deux simultanément.
 
 ## Intégration avec le setup.exe d'une application cible
 
@@ -600,10 +727,9 @@ pratique d'intégration complet, à jour sur ce modèle :
    `config_*.json`, `config_actualise.json` exclu) — sinon il
    désinstallerait Actualise sous des applications qui en dépendent
    encore. Pas de raccourci créé par ce setup : Actualise n'est jamais
-   lancé directement par l'utilisateur (voir la décision actée « le
-   raccourci ne doit jamais pointer directement vers l'application
-   cible », qui reste — sous une forme adaptée — le raccourci pointe
-   toujours vers `Actualise.exe`, jamais vers l'application cible).
+   lancé directement par l'utilisateur, ni par aucun raccourci — voir
+   point 2 ci-dessous (correction issue #73) pour le raccourci réel,
+   qui pointe vers l'application cible elle-même.
 
 2. **Le setup.exe de chaque application cible** (ex. Scrabble,
    Rummikub) — **ne déploie plus** `Actualise.exe`/`_internal\`/
@@ -614,15 +740,26 @@ pratique d'intégration complet, à jour sur ce modèle :
      (jamais `config_actualise.json`, propriété exclusive du setup
      Actualise) ;
    - créer le raccourci Bureau/menu Démarrer pointant vers
-     `C:\Actualise\Actualise.exe --config <nom>` — jamais directement
-     vers l'exécutable de l'application cible (décision actée dès le
-     « Principe de fonctionnement ») ;
+     l'exécutable de l'application cible **elle-même** (ex.
+     `Scrabble.exe`), comme n'importe quelle application Windows
+     classique — **correction (issue #73)** : ce document affirmait
+     auparavant à plusieurs endroits que ce raccourci devait pointer
+     vers `C:\Actualise\Actualise.exe --config <nom>`, ce qui ne
+     correspond pas (et n'a semble-t-il jamais correspondu) au
+     comportement réel. C'est l'application cible elle-même qui, dans
+     son propre code (voir INTEGRATION.md, §6), lance `Actualise.exe
+     --config <nom>` par un `Popen` non bloquant à son propre démarrage
+     — uniquement si `C:\Actualise\Actualise.exe` existe — sans jamais
+     attendre sa fin ni bloquer sa propre fenêtre. Le setup de
+     l'application cible n'a donc rien de particulier à faire pour
+     déclencher Actualise : un raccourci Bureau/menu Démarrer tout à
+     fait ordinaire suffit ;
    - déployer son propre fichier `.ico` et l'utiliser à la fois pour le
-     champ `IconFilename` du raccourci créé (qui pointe vers
-     `Actualise.exe` mais affiche l'icône de l'application cible) et
-     pour le champ `icone` de `config_<nom>.json` — même chemin dans
-     les deux cas, pour cohérence documentée (voir « Contenu des
-     fichiers de configuration »).
+     champ `IconFilename` du raccourci créé (qui pointe désormais
+     directement vers l'exécutable de l'application cible, donc affiche
+     naturellement son icône) et pour le champ `icone` de
+     `config_<nom>.json` — même chemin dans les deux cas, pour cohérence
+     documentée (voir « Contenu des fichiers de configuration »).
 
    Ce découplage préserve la réutilisabilité d'Actualise pour de
    futures applications cibles et sépare le cycle de vie des
@@ -641,7 +778,7 @@ et son propre dossier) à ce modèle à deux setups distincts.
 |---|---|
 | Déclenchement de version "officielle" | Alain décide manuellement quand publier une version (via les Releases GitHub, avec tag de version) — pas à chaque commit |
 | Comportement hors-ligne / échec réseau | Se rabat silencieusement sur le lancement de la version déjà installée, sans bloquer l'utilisateur final |
-| Raccourci utilisateur | Pointe vers Actualise, jamais directement vers l'application cible |
+| Raccourci utilisateur | Pointe vers l'application cible elle-même (correction issue #73 — voir « Principe de fonctionnement ») ; c'est l'application cible qui lance Actualise à son propre démarrage, jamais l'inverse |
 | Configuration | Répertoire dédié type `C:\Actualise\` avec un fichier `config.json` reprenant : version actuelle de l'exe cible, dépôt GitHub cible, répertoire d'installation cible, et autres éléments à définir. Prévoir un chemin **portable** pour les tests/usage Linux (ex. `~/.config/actualise/` ou une variable d'environnement) en plus de `C:\Actualise\`, pour ne pas entamer la réutilisabilité Linux visée par le projet |
 | Notifications | Un topic ntfy dédié par programme géré (règle par défaut) ; notification informative envoyée quand une mise à jour a été téléchargée en arrière-plan (effective au prochain lancement), message préfixé par `"MAJ - "` pour se distinguer visuellement d'autres types de notifications pouvant partager le même topic ; **cas particulier Scrabble** : réutilise le topic existant des notifications d'issues fermées Bridge_Agent du projet Scrabble plutôt qu'un topic dédié séparé, car seul Alain est abonné aux deux flux — voir « Contenu des fichiers de configuration » |
 | Format de version | `version.json` avec entier incrémental `build` (ex. `{"build": 47}`), comparaison `>` entre entiers — pas de semver ni de comparaison de chaînes brute (piège "9" > "10" lexicographique) |
@@ -656,10 +793,11 @@ et son propre dossier) à ce modèle à deux setups distincts.
 | Garde-fou anti-boucle | Marqueur explicite transmis parent → enfant (env `ACTUALISE_CHILD=1` ou arg `--child`), déclenché uniquement lors de la bascule d'une mise à jour déjà téléchargée — voir section dédiée ci-dessus |
 | Configuration portable | Dossier résolu **relativement à l'emplacement de l'exécutable `Actualise.exe`** (via `sys.executable` en mode PyInstaller figé, `config.chemin_config_portable()`) — mécanisme de résolution inchangé depuis la conception initiale (issue #4) ; ce qui a changé (issue #44), c'est la convention de déploiement : `Actualise.exe` n'est plus installé qu'une seule fois, dans un dossier fixe et **partagé** (`C:\Actualise\`, imposé par `Actualise-Setup.exe`), donc cette résolution relative pointe désormais systématiquement vers ce même dossier partagé quelle que soit l'application cible qui a lancé Actualise ; équivalent portable sous Linux inchangé (`~/.config/actualise/` ou variable d'environnement `ACTUALISE_CONFIG_DIR`) — voir « Configuration portable » et « Points de vigilance connus » pour l'historique complet |
 | Contenu de la configuration | Deux fichiers séparés (issue #35) remplaçant l'ancien `config.json` unique à deux blocs : `config_actualise.json` (un seul exemplaire, **partagé** entre toutes les applications cibles gérées par cette installation — `build_installe`, `depot_github`, `zone_attente` d'Actualise) et `config_<nom_app>.json` (un exemplaire **par application cible** — `nom`, `depot_github`, `build_installe`, `repertoire_installation`, `executable`, `icone` optionnel, `topic_ntfy`) ; sélection du fichier `config_<nom_app>.json` à charger via l'argument obligatoire `--config <nom>` passé à `Actualise.exe` ; `config.charger_config(nom_app)` lit et fusionne les deux fichiers en un seul dict pour le reste d'Actualise — voir « Contenu des fichiers de configuration » |
-| Intégration au setup.exe cible | Modèle actuel (issue #44) : **deux setups distincts**. `Actualise-Setup.exe` (installeur InnoSetup dédié, `installeur/actualise.iss`) installe l'instance partagée d'Actualise une seule fois, dans un dossier fixe et non modifiable `C:\Actualise\` (`DisableDirPage=yes`, `PrivilegesRequired=admin`), et crée `config_actualise.json` seulement s'il n'existe pas déjà. Le setup de chaque application cible **ne déploie plus Actualise lui-même** — seulement son `config_<nom>.json`, son raccourci Bureau/menu Démarrer vers `Actualise.exe --config <nom>` (jamais directement vers l'application cible), et son icône `.ico` (même chemin utilisé pour `IconFilename` du raccourci et pour le champ `icone` de `config_<nom>.json`) — voir « Intégration avec le setup.exe d'une application cible » |
-| ActualiseUI.exe | Module séparé (issue #36), jamais importé par `actualise.py`, compilé en exécutable indépendant (`actualise_ui.py` → `ActualiseUI.exe`) et déployé uniquement par `Actualise-Setup.exe`. Gère le dialogue de mise à jour d'Actualise côté utilisateur final (fenêtre tkinter « Mettre à jour »/« Plus tard »), en repli sur la bascule silencieuse par renommage si le flag/bat n'a pas pu être généré — voir « ActualiseUI.exe — dialogue de mise à jour côté utilisateur final » |
+| Intégration au setup.exe cible | Modèle actuel (issue #44) : **deux setups distincts**. `Actualise-Setup.exe` (installeur InnoSetup dédié, `installeur/actualise.iss`) installe l'instance partagée d'Actualise une seule fois, dans un dossier fixe et non modifiable `C:\Actualise\` (`DisableDirPage=yes`, `PrivilegesRequired=admin`), et crée `config_actualise.json` seulement s'il n'existe pas déjà. Le setup de chaque application cible **ne déploie plus Actualise lui-même** — seulement son `config_<nom>.json`, son raccourci Bureau/menu Démarrer vers l'exécutable de l'application cible elle-même (correction issue #73 — plus vers `Actualise.exe --config <nom>`), et son icône `.ico` (même chemin utilisé pour `IconFilename` du raccourci et pour le champ `icone` de `config_<nom>.json`) — voir « Intégration avec le setup.exe d'une application cible » |
+| ActualiseUI.exe | Module séparé (issue #36), jamais importé par `actualise.py`, compilé en exécutable indépendant (`actualise_ui.py` → `ActualiseUI.exe`) et déployé uniquement par `Actualise-Setup.exe`. Gère le dialogue de mise à jour côté utilisateur final (fenêtre tkinter « Mettre à jour »/« Plus tard »), en repli sur la bascule silencieuse par renommage si le flag/bat n'a pas pu être généré pour Actualise lui-même — voir « ActualiseUI.exe — dialogue de mise à jour côté utilisateur final » |
 | Cycle de vie d'Actualise | Actualise ne lance plus l'application cible — c'est elle qui le lance à son démarrage ; Actualise attend uniquement la fin de sa propre tâche de fond (vérification, téléchargement, validation SHA-256, notification ntfy), puis se termine — indépendamment du cycle de vie de l'application cible ; Actualise n'est pas un processus permanent, c'est un aller-retour ponctuel à chaque démarrage de l'application cible |
 | Nommage versionné des zips en zone d'attente | `<préfixe>_<build>.zip` (ex. `actualise_48.zip`, `scrabble_112.zip`) — comparaison directe avec `build_installe` sans ouvrir le zip ; au démarrage, résidu avec `build` ≤ `build_installe` correspondant supprimé sans être appliqué (nettoyage automatique, garde-fou contre un zip bloqué indéfiniment en zone d'attente) ; **si plusieurs zips du même préfixe coexistent**, seul celui au build le plus élevé est considéré, les autres supprimés sans être appliqués (même logique que pour un résidu obsolète) — voir « Nommage versionné des zips en zone d'attente » |
+| Mise à jour d'un jeu (issue #73) | Un zip d'application cible ne s'applique plus jamais par extraction directe au démarrage (bug corrigé : son exécutable tourne en réalité toujours à ce moment, voir « Garde-fou anti-boucle infinie ») — uniquement via le même mécanisme flag + bat qu'Actualise, généralisé à un contenu de zip arbitraire (bascule de chaque entrée de premier niveau du zip, pas de `manifest["supprimer"]`), le bat attendant en plus la fin de l'exécutable du jeu lui-même ; un seul flag `actualise_update.flag` à la fois par dossier (même nom de fichier pour les deux usages, champ `type` facultatif purement informationnel) ; Actualise lui-même passe toujours en premier si les deux mises à jour sont détectées au même cycle — voir « ActualiseUI.exe » |
 
 ## Points de vigilance connus
 
