@@ -49,7 +49,7 @@ if /i "%~1"=="--build" (
         echo           Arguments acceptes : --publier, --build N
         exit /b 1
     )
-    echo %~2| findstr /r "^[0-9][0-9]*$" >nul
+    echo %~2| findstr /r "^[1-9][0-9]*$" >nul
     if errorlevel 1 (
         echo [ERREUR] --build necessite un entier positif ; recu : %~2
         echo           Arguments acceptes : --publier, --build N
@@ -366,10 +366,13 @@ if "%PUBLIER%"=="1" (
     echo   COMMITE EN LOCAL dans %ORIGDIR%.
     echo.
     echo   Le script ne fait JAMAIS de git push ni de gh release create. A la main :
-    echo     1^) git -C "%ORIGDIR%" push
-    echo     2^) Creer la Release GitHub ^(tag v%BUILD%^) avec DEUX fichiers attaches :
+    echo   Etapes MANUELLES restantes, dans cet ordre :
+    echo     1^) Fusionner la branche du worktree dans master ^(relecture_web,
+    echo        entree actualise_ccw^), SANS pousser.
+    echo     2^) Creer la Release v%BUILD% avec DEUX fichiers attaches :
     echo          - installeur\output\%SETUPNAME%
     echo          - installeur\output\%ZIPNAME%
+    echo     3^) Pousser master.
     echo   ============================================================================
 )
 endlocal
