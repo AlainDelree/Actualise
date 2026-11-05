@@ -618,6 +618,47 @@ mécanisme flag + bat, moyennant les adaptations suivantes :
   champ facultatif `type` (`"actualise"` ou `"jeu"`) ajouté au JSON du
   flag, purement informationnel (diagnostic humain), que ce code
   existant ignore totalement.
+- **Bat écrit sous le dossier d'Actualise, pas dans le dossier du jeu
+  (correction issue #84, suite à l'audit #92).** Ce document affirmait
+  auparavant que le bat d'un jeu était généré dans
+  `repertoire_installation`, comme son flag. La lecture du code déjà
+  déployé côté Scrabble (`chemin_actualise_valide`/
+  `traiter_flag_actualise`) a établi que ce code n'accepte une valeur
+  `"bat"` lue dans le flag que si elle désigne un fichier `.bat`/`.exe`
+  **existant et situé sous `C:\Actualise` (chemin résolu)** — un chemin
+  sous le dossier du jeu est donc systématiquement refusé, journalisé
+  comme tel au démarrage, et la mise à jour d'un jeu Scrabble ne
+  s'applique jamais. Le bat d'un jeu est donc désormais écrit sous
+  `config.chemin_config_portable()` (le même dossier où est déjà écrit
+  `updater.bat` d'Actualise lui-même), sous le nom
+  **`updater_<nom>.bat`** — `<nom>` étant l'identifiant d'application déjà
+  utilisé par le code pour `config_<nom>.json` et la zone d'attente — afin
+  de ne jamais entrer en collision ni avec `updater.bat` (Actualise
+  lui-même) ni avec le bat d'un autre jeu géré par la même installation.
+  Le gabarit continue de faire un `cd /d` explicite vers le dossier du
+  jeu en tout début de script : toutes les opérations relatives
+  (bascule des entrées du zip, journal `updater.log`) restent donc
+  appliquées dans le dossier du jeu, inchangé — seul l'emplacement du
+  fichier `.bat` lui-même change, tous les chemins qu'il référence
+  (zip, flag, config) étant déjà absolus. `<nom>` n'est accepté dans ce
+  nom de fichier que s'il est non vide et limité aux lettres
+  ASCII/chiffres/`_`/`-` (règle de sécurité : protège contre un nom venu
+  de la configuration contenant un séparateur de chemin, `..` ou un
+  espace) — un nom invalide est rejeté proprement (log, aucun fichier
+  écrit), sans faire planter Actualise. Rummikub, qui ne valide aucun
+  dossier pour la clé `"bat"` du flag, n'était pas affecté par ce bug
+  mais n'est pas non plus perturbé par ce changement, puisqu'il ne lit
+  que le chemin indiqué par le flag, quel qu'il soit. Un ancien
+  `updater.bat` laissé dans le dossier du jeu par une version
+  antérieure à cette correction est nettoyé au passage suivant (voir
+  `_nettoyer_ancien_bat_jeu`), mais seulement s'il porte la marque du
+  gabarit jeu d'Actualise et seulement une fois le bat/flag régénérés
+  avec succès au nouvel emplacement — un fichier homonyme qui ne porte
+  pas cette marque est conservé et signalé dans le journal ; de même, un
+  ancien flag de type `"jeu"` dont la clé `"bat"` pointe hors du dossier
+  d'Actualise est considéré périmé et régénéré au nouvel emplacement
+  (jamais un flag de type `"actualise"`, jamais touché par ce
+  nettoyage).
 - **Un seul flag à la fois, par dossier.** Le nom de fichier étant
   identique pour les deux usages, un seul type de mise à jour peut être
   en attente de validation/bascule dans le dossier d'une application
@@ -799,6 +840,7 @@ et son propre dossier) à ce modèle à deux setups distincts.
 | Cycle de vie d'Actualise | Actualise ne lance plus l'application cible — c'est elle qui le lance à son démarrage ; Actualise attend uniquement la fin de sa propre tâche de fond (vérification, téléchargement, validation SHA-256, notification ntfy), puis se termine — indépendamment du cycle de vie de l'application cible ; Actualise n'est pas un processus permanent, c'est un aller-retour ponctuel à chaque démarrage de l'application cible |
 | Nommage versionné des zips en zone d'attente | `<préfixe>_<build>.zip` (ex. `actualise_48.zip`, `scrabble_112.zip`) — comparaison directe avec `build_installe` sans ouvrir le zip ; au démarrage, résidu avec `build` ≤ `build_installe` correspondant supprimé sans être appliqué (nettoyage automatique, garde-fou contre un zip bloqué indéfiniment en zone d'attente) ; **si plusieurs zips du même préfixe coexistent**, seul celui au build le plus élevé est considéré, les autres supprimés sans être appliqués (même logique que pour un résidu obsolète) — voir « Nommage versionné des zips en zone d'attente » |
 | Mise à jour d'un jeu (issue #73) | Un zip d'application cible ne s'applique plus jamais par extraction directe au démarrage (bug corrigé : son exécutable tourne en réalité toujours à ce moment, voir « Garde-fou anti-boucle infinie ») — uniquement via le même mécanisme flag + bat qu'Actualise, généralisé à un contenu de zip arbitraire (bascule de chaque entrée de premier niveau du zip, pas de `manifest["supprimer"]`), le bat attendant en plus la fin de l'exécutable du jeu lui-même ; un seul flag `actualise_update.flag` à la fois par dossier (même nom de fichier pour les deux usages, champ `type` facultatif purement informationnel) ; Actualise lui-même passe toujours en premier si les deux mises à jour sont détectées au même cycle — voir « ActualiseUI.exe » |
+| Emplacement du bat d'un jeu (correction issue #84, audit #92) | Écrit sous le dossier d'Actualise (`config.chemin_config_portable()`), nom `updater_<nom>.bat` — plus jamais dans le dossier du jeu : le code déjà déployé côté Scrabble n'accepte une valeur `"bat"` du flag que si elle désigne un `.bat`/`.exe` existant sous `C:\Actualise` (chemin résolu), un chemin sous le dossier du jeu était donc systématiquement refusé et la mise à jour d'un jeu Scrabble ne s'appliquait jamais ; `<nom>` validé (lettres ASCII/chiffres/`_`/`-` uniquement, non vide) avant toute écriture, rejet propre sinon ; nettoyage de l'existant (ancien `updater.bat` du jeu supprimé seulement s'il porte la marque du gabarit jeu, ancien flag jeu périmé régénéré, flag Actualise jamais touché) — voir « Généralisation à la mise à jour d'un jeu » |
 
 ## Points de vigilance connus
 

@@ -27,8 +27,11 @@ from pathlib import Path
 from unittest.mock import call, patch
 
 from actualise import (
+    _MARQUE_GABARIT_BAT_JEU,
+    _assurer_maj_jeu_en_attente,
     _generer_updater_bat,
     _generer_updater_bat_jeu,
+    _nom_jeu_valide,
     appliquer_mises_a_jour_en_attente,
     configurer_logging,
     main,
@@ -132,7 +135,10 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
             chemin_zip_appele, dossier_appele = mock_generer_bat_jeu.call_args[0][:2]
             self.assertEqual(chemin_zip_appele, chemin_zip)
             self.assertEqual(dossier_appele, self.repertoire_cible)
-            executable_appele, build_appele = mock_generer_bat_jeu.call_args[0][4:6]
+            nom_appele, dossier_actualise_appele = mock_generer_bat_jeu.call_args[0][2:4]
+            self.assertEqual(nom_appele, "scrabble")
+            self.assertEqual(dossier_actualise_appele, self.dossier_actualise)
+            executable_appele, build_appele = mock_generer_bat_jeu.call_args[0][6:8]
             self.assertEqual(executable_appele, "Scrabble.exe")
             self.assertEqual(build_appele, 48)
 
@@ -309,7 +315,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
         self.mock_config.sauvegarder_config_app.assert_not_called()
         self.assertTrue(
-            any("bat/flag" in message.lower() for message in journal.output)
+            any("bat" in message.lower() for message in journal.output)
         )
 
     def test_jeu_aucun_nouveau_flag_si_flag_deja_present(self):
@@ -539,6 +545,227 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         self.assertTrue(any("config_actualise.json" in message for message in journal.output))
 
 
+class TestNomJeuValide(unittest.TestCase):
+    def test_noms_valides(self):
+        for nom in ["scrabble", "Rummikub", "jeu_2", "jeu-2", "A", "123"]:
+            with self.subTest(nom=nom):
+                self.assertTrue(_nom_jeu_valide(nom))
+
+    def test_noms_invalides(self):
+        # Vide, séparateur de chemin, "..", espace, caractère accentué ou
+        # spécial — voir ``_RE_NOM_JEU_VALIDE``.
+        for nom in [
+            "",
+            "scr/abble",
+            "scr\\abble",
+            "..",
+            "scrabble..",
+            "scrabble jeu",
+            "éclair",
+            "jeu!",
+            "jeu.bat",
+        ]:
+            with self.subTest(nom=nom):
+                self.assertFalse(_nom_jeu_valide(nom))
+
+
+class TestAssurerMajJeuEnAttenteEmplacementEtNettoyage(unittest.TestCase):
+    """Issue #84 : le bat d'un jeu est désormais écrit sous le dossier
+    d'Actualise (``updater_<nom>.bat``), pas dans le dossier du jeu — seul
+    le code déjà déployé dans Scrabble (qui valide le chemin lu dans le
+    flag) a motivé ce changement. Ces tests exercent
+    ``_assurer_maj_jeu_en_attente`` de bout en bout, sans mocker
+    ``_generer_updater_bat_jeu``/``_ecrire_flag_maj`` (contrairement à
+    ``TestAppliquerMisesAJourEnAttente``), pour vérifier l'emplacement et
+    le contenu réellement écrits sur le disque.
+    """
+
+    def setUp(self):
+        self.dossier_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dossier_temp.cleanup)
+        self.racine = Path(self.dossier_temp.name)
+
+        self.dossier_actualise = self.racine / "actualise_install"
+        self.dossier_actualise.mkdir()
+        self.dossier_jeu = self.racine / "jeu_install"
+        self.dossier_jeu.mkdir()
+
+        patcher_config = patch("actualise.config")
+        self.mock_config = patcher_config.start()
+        self.addCleanup(patcher_config.stop)
+        self.mock_config.chemin_config_portable.return_value = self.dossier_actualise
+
+        self.bloc_app = {"executable": "Scrabble.exe"}
+
+    def test_chemin_bat_sous_dossier_actualise_et_satisfait_regle_scrabble(self):
+        chemin_zip = self.dossier_jeu / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        _assurer_maj_jeu_en_attente("scrabble", self.bloc_app, self.dossier_jeu, chemin_zip, 48)
+
+        chemin_flag = self.dossier_jeu / "actualise_update.flag"
+        self.assertTrue(chemin_flag.exists())
+        contenu_flag = json.loads(chemin_flag.read_text(encoding="utf-8"))
+        chemin_bat = Path(contenu_flag["bat"])
+
+        # Règle de Scrabble (lecture du code, voir rapport de l'issue) :
+        # fichier ``.bat`` existant, chemin résolu sous le dossier
+        # d'Actualise.
+        self.assertEqual(chemin_bat.name, "updater_scrabble.bat")
+        self.assertEqual(chemin_bat.suffix, ".bat")
+        self.assertTrue(chemin_bat.is_file())
+        self.assertEqual(chemin_bat.resolve().parent, self.dossier_actualise.resolve())
+
+    def test_nom_invalide_rejete_sans_fichier_ni_exception(self):
+        for nom_invalide in ["", "../evil", "scr/abble", "scrabble ", "éclair"]:
+            with self.subTest(nom=nom_invalide):
+                chemin_zip = self.dossier_jeu / "jeu_48.zip"
+                _creer_zip_avec_manifest(chemin_zip, build=48)
+
+                with self.assertLogs("actualise", level="ERROR") as journal:
+                    _assurer_maj_jeu_en_attente(
+                        nom_invalide, self.bloc_app, self.dossier_jeu, chemin_zip, 48
+                    )
+
+                self.assertTrue(any("invalide" in m.lower() for m in journal.output))
+                self.assertFalse((self.dossier_jeu / "actualise_update.flag").exists())
+                self.assertEqual(list(self.dossier_actualise.iterdir()), [])
+                chemin_zip.unlink()
+
+    def test_deux_jeux_noms_differents_deux_bats_sans_collision(self):
+        dossier_rummikub = self.racine / "rummikub_install"
+        dossier_rummikub.mkdir()
+
+        chemin_zip_scrabble = self.dossier_jeu / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip_scrabble, build=48)
+        chemin_zip_rummikub = dossier_rummikub / "rummikub_9.zip"
+        _creer_zip_avec_manifest(chemin_zip_rummikub, build=9)
+
+        _assurer_maj_jeu_en_attente(
+            "scrabble", self.bloc_app, self.dossier_jeu, chemin_zip_scrabble, 48
+        )
+        _assurer_maj_jeu_en_attente(
+            "rummikub", {"executable": "Rummikub.exe"}, dossier_rummikub, chemin_zip_rummikub, 9
+        )
+
+        chemin_bat_scrabble = self.dossier_actualise / "updater_scrabble.bat"
+        chemin_bat_rummikub = self.dossier_actualise / "updater_rummikub.bat"
+        self.assertTrue(chemin_bat_scrabble.is_file())
+        self.assertTrue(chemin_bat_rummikub.is_file())
+        self.assertNotEqual(chemin_bat_scrabble, chemin_bat_rummikub)
+        self.assertNotEqual(chemin_bat_scrabble.name, "updater.bat")
+        self.assertNotEqual(chemin_bat_rummikub.name, "updater.bat")
+
+        contenu_flag_scrabble = json.loads(
+            (self.dossier_jeu / "actualise_update.flag").read_text(encoding="utf-8")
+        )
+        contenu_flag_rummikub = json.loads(
+            (dossier_rummikub / "actualise_update.flag").read_text(encoding="utf-8")
+        )
+        self.assertEqual(Path(contenu_flag_scrabble["bat"]), chemin_bat_scrabble)
+        self.assertEqual(Path(contenu_flag_rummikub["bat"]), chemin_bat_rummikub)
+
+    def test_contenu_flag_bat_et_actualise_ui_uniquement(self):
+        chemin_zip = self.dossier_jeu / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        _assurer_maj_jeu_en_attente("scrabble", self.bloc_app, self.dossier_jeu, chemin_zip, 48)
+
+        contenu_flag = json.loads(
+            (self.dossier_jeu / "actualise_update.flag").read_text(encoding="utf-8")
+        )
+        self.assertEqual(set(contenu_flag.keys()), {"actualise_ui", "bat", "type"})
+        self.assertEqual(contenu_flag["type"], "jeu")
+        self.assertEqual(
+            Path(contenu_flag["actualise_ui"]), self.dossier_actualise / "ActualiseUI.exe"
+        )
+        self.assertEqual(
+            Path(contenu_flag["bat"]), self.dossier_actualise / "updater_scrabble.bat"
+        )
+
+    def test_ancien_bat_marque_supprime_apres_regeneration_reussie(self):
+        ancien_bat = self.dossier_jeu / "updater.bat"
+        ancien_bat.write_text(
+            f'@echo off\ncall :log "=== {_MARQUE_GABARIT_BAT_JEU} (build cible 11) ==="\n',
+            encoding="utf-8",
+        )
+        chemin_zip = self.dossier_jeu / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        _assurer_maj_jeu_en_attente("scrabble", self.bloc_app, self.dossier_jeu, chemin_zip, 48)
+
+        self.assertFalse(ancien_bat.exists())
+        self.assertTrue((self.dossier_actualise / "updater_scrabble.bat").is_file())
+
+    def test_fichier_homonyme_sans_marque_conserve_et_signale(self):
+        ancien_fichier = self.dossier_jeu / "updater.bat"
+        ancien_fichier.write_text("rem fichier sans rapport avec Actualise\n", encoding="utf-8")
+        chemin_zip = self.dossier_jeu / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        with self.assertLogs("actualise", level="WARNING") as journal:
+            _assurer_maj_jeu_en_attente("scrabble", self.bloc_app, self.dossier_jeu, chemin_zip, 48)
+
+        self.assertTrue(ancien_fichier.exists())
+        self.assertEqual(
+            ancien_fichier.read_text(encoding="utf-8"), "rem fichier sans rapport avec Actualise\n"
+        )
+        self.assertTrue(any("marque" in m.lower() for m in journal.output))
+
+    def test_drapeau_jeu_perime_remplace_au_nouvel_emplacement(self):
+        chemin_flag = self.dossier_jeu / "actualise_update.flag"
+        chemin_flag.write_text(
+            json.dumps(
+                {
+                    "actualise_ui": str(self.dossier_jeu / "ActualiseUI.exe"),
+                    "bat": str(self.dossier_jeu / "updater.bat"),
+                    "type": "jeu",
+                }
+            ),
+            encoding="utf-8",
+        )
+        chemin_zip = self.dossier_jeu / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        _assurer_maj_jeu_en_attente("scrabble", self.bloc_app, self.dossier_jeu, chemin_zip, 48)
+
+        contenu_flag = json.loads(chemin_flag.read_text(encoding="utf-8"))
+        self.assertEqual(contenu_flag["type"], "jeu")
+        self.assertEqual(
+            Path(contenu_flag["bat"]), self.dossier_actualise / "updater_scrabble.bat"
+        )
+
+    def test_drapeau_actualise_jamais_touche_par_le_nettoyage(self):
+        chemin_flag = self.dossier_jeu / "actualise_update.flag"
+        contenu_initial = {
+            "actualise_ui": str(self.dossier_jeu / "ActualiseUI.exe"),
+            "bat": str(self.dossier_jeu / "updater.bat"),
+            "type": "actualise",
+        }
+        chemin_flag.write_text(json.dumps(contenu_initial), encoding="utf-8")
+        chemin_zip = self.dossier_jeu / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        _assurer_maj_jeu_en_attente("scrabble", self.bloc_app, self.dossier_jeu, chemin_zip, 48)
+
+        self.assertEqual(json.loads(chemin_flag.read_text(encoding="utf-8")), contenu_initial)
+        self.assertEqual(list(self.dossier_actualise.iterdir()), [])
+
+    def test_echec_ecriture_flag_supprime_bat_orphelin(self):
+        chemin_zip = self.dossier_jeu / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        with patch(
+            "actualise._ecrire_flag_maj", side_effect=OSError("droits insuffisants")
+        ), self.assertLogs("actualise", level="ERROR") as journal:
+            _assurer_maj_jeu_en_attente("scrabble", self.bloc_app, self.dossier_jeu, chemin_zip, 48)
+
+        self.assertEqual(list(self.dossier_actualise.iterdir()), [])
+        self.assertFalse((self.dossier_jeu / "actualise_update.flag").exists())
+        self.assertTrue(chemin_zip.exists())
+        self.assertTrue(any("orphelin" in m.lower() for m in journal.output))
+
+
 class TestConfigurerLogging(unittest.TestCase):
     def setUp(self):
         self.dossier_temp = tempfile.TemporaryDirectory()
@@ -704,6 +931,8 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
             (
                 chemin_zip_appele,
                 dossier_appele,
+                nom_appele,
+                dossier_actualise_appele,
                 _chemin_flag,
                 _chemin_config,
                 executable_appele,
@@ -711,6 +940,8 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
                 entrees_appelees,
             ) = mock_generer_bat_jeu.call_args[0]
             self.assertEqual(dossier_appele, dossier_jeu)
+            self.assertEqual(nom_appele, "scrabble")
+            self.assertEqual(dossier_actualise_appele, dossier_actualise)
             self.assertEqual(executable_appele, "Scrabble.exe")
             self.assertEqual(build_appele, 48)
             self.assertEqual(set(entrees_appelees), {"manifest.json", "Scrabble.exe"})
@@ -764,6 +995,7 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
         # mise à jour à la fois.
         self.assertTrue((self.zone_attente / "scrabble_48.zip").exists())
         self.assertFalse((dossier_jeu / "updater.bat").exists())
+        self.assertFalse((dossier_actualise / "updater_scrabble.bat").exists())
 
     def test_pas_de_mise_a_jour_ne_fait_rien(self):
         with patch("actualise.version_check") as mock_version_check, patch(
@@ -1068,24 +1300,33 @@ class TestGabaritUpdaterBatJeu(unittest.TestCase):
         self.addCleanup(self.dossier_temp.cleanup)
         self.dossier_jeu = Path(self.dossier_temp.name) / "jeu_install"
         self.dossier_jeu.mkdir()
+        self.dossier_actualise = Path(self.dossier_temp.name) / "actualise_install"
+        self.dossier_actualise.mkdir()
         self.nom_exe = "FauxJeu.exe"
         _creer_installation_jeu(self.dossier_jeu, self.nom_exe)
 
         self.chemin_zip = self.dossier_jeu / "fauxjeu_11.zip"
         self.chemin_flag = self.dossier_jeu / "actualise_update.flag"
         self.chemin_flag.write_text("{}", encoding="utf-8")
-        self.chemin_config = self.dossier_jeu / "config_fauxjeu.json"
+        self.chemin_config = self.dossier_actualise / "config_fauxjeu.json"
 
     def _generer_et_executer(self, entrees_racine, build=11, max_attente=3, timeout=60):
+        # Issue #84 : le bat d'un jeu est désormais écrit sous le dossier
+        # d'Actualise (``updater_<nom>.bat``), pas dans le dossier du jeu
+        # — seul l'emplacement du fichier change, le gabarit continue de
+        # ``cd /d`` vers ``self.dossier_jeu`` en tout début de script.
         chemin_bat = _generer_updater_bat_jeu(
             self.chemin_zip,
             self.dossier_jeu,
+            "fauxjeu",
+            self.dossier_actualise,
             self.chemin_flag,
             self.chemin_config,
             self.nom_exe,
             build,
             entrees_racine,
         )
+        self.assertEqual(chemin_bat, self.dossier_actualise / "updater_fauxjeu.bat")
         env = dict(os.environ)
         env["ACTUALISE_UPDATER_MAX_ATTENTE"] = str(max_attente)
         subprocess.run(

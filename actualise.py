@@ -146,6 +146,22 @@ _NOM_EXECUTABLE = "Actualise.exe"
 _NOM_DOSSIER_INTERNAL = "_internal"
 _NOM_FLAG_MAJ_ACTUALISE = "actualise_update.flag"
 
+# Règle de sécurité (audit issue #92/#84) : ``nom`` sert à construire un nom
+# de fichier (``updater_<nom>.bat``) sous le dossier d'Actualise — n'accepter
+# que lettres ASCII/chiffres/``_``/``-`` élimine par construction tout
+# séparateur de chemin, tout ``..`` et tout espace venu d'une configuration
+# mal formée, sans avoir à les énumérer un par un.
+_RE_NOM_JEU_VALIDE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _nom_jeu_valide(nom: str) -> bool:
+    """Vrai si ``nom`` peut entrer sans risque dans un nom de fichier
+    (``updater_<nom>.bat``) : non vide, lettres ASCII/chiffres/``_``/``-``
+    uniquement. Voir ``_assurer_maj_jeu_en_attente``, qui refuse toute
+    génération de bat/flag si ce nom est invalide.
+    """
+    return bool(_RE_NOM_JEU_VALIDE.match(nom))
+
 
 def _basculer_par_renommage(dossier_source: Path, destination: Path) -> None:
     """Bascule le contenu de ``dossier_source`` (dossier temporaire
@@ -901,15 +917,38 @@ exit /b 0
 def _generer_updater_bat_jeu(
     chemin_zip: Path,
     dossier_jeu: Path,
+    nom_jeu: str,
+    dossier_actualise: Path,
     chemin_flag: Path,
     chemin_config_app: Path,
     executable_jeu: str,
     build: int,
     entrees_racine: list[str],
 ) -> Path:
-    """Génère ``updater.bat`` dans ``dossier_jeu`` (dossier d'installation
-    de l'application cible), pour appliquer la mise à jour de ce jeu une
-    fois le jeu fermé.
+    """Génère ``updater_<nom_jeu>.bat`` dans ``dossier_actualise`` (dossier
+    partagé d'Actualise, pas le dossier d'installation du jeu), pour
+    appliquer la mise à jour de ce jeu une fois le jeu fermé.
+
+    **Emplacement du bat (issue #84, suite à l'audit #92/SEC-?)** : le bat
+    d'un jeu était auparavant écrit dans ``dossier_jeu`` lui-même, comme
+    celui d'Actualise dans son propre dossier. Or le code déjà déployé
+    côté Scrabble valide le chemin lu dans ``actualise_update.flag`` et
+    n'accepte que des chemins situés sous le dossier d'Actualise (chemin
+    résolu) — un chemin sous ``dossier_jeu`` est donc systématiquement
+    refusé, rendant la mise à jour de Scrabble inopérante. Le bat est
+    donc désormais écrit sous ``dossier_actualise``, au nom
+    ``updater_<nom_jeu>.bat`` (``nom_jeu`` étant l'identifiant d'application
+    déjà utilisé par le code pour ``config_<nom_jeu>.json`` et la zone
+    d'attente — voir ``_assurer_maj_jeu_en_attente``, qui valide ce nom
+    avant tout appel ici) pour ne jamais entrer en collision avec
+    ``updater.bat`` (celui d'Actualise lui-même) ni avec le bat d'un
+    autre jeu géré par la même installation. Le gabarit continue de
+    ``cd /d "{dossier_jeu}"`` en tout début de script : toutes les
+    opérations relatives (bascule des entrées du zip, journal
+    ``updater.log``) restent donc appliquées dans ``dossier_jeu``,
+    inchangé — seul l'emplacement du fichier ``.bat`` lui-même change,
+    tous les chemins qu'il référence (``ZIP``, ``FLAG``, ``CONFIG``)
+    étant déjà absolus.
 
     Généralisation, pour une application cible quelconque, du mécanisme
     ``_generer_updater_bat`` déjà en place pour Actualise lui-même (voir
@@ -946,7 +985,7 @@ def _generer_updater_bat_jeu(
     )
     blocs_nettoyage = "".join(_bloc_nettoyage_backup_jeu(nom) for nom in entrees_racine)
 
-    chemin_bat = dossier_jeu / "updater.bat"
+    chemin_bat = dossier_actualise / f"updater_{nom_jeu}.bat"
     chemin_bat.write_text(
         _GABARIT_UPDATER_BAT_JEU.format(
             dossier_jeu=dossier_jeu,
@@ -965,6 +1004,105 @@ def _generer_updater_bat_jeu(
     return chemin_bat
 
 
+# Marque littérale présente dans le gabarit du bat de mise à jour d'un jeu
+# (``_GABARIT_UPDATER_BAT_JEU``) mais pas dans celui d'Actualise
+# (``_GABARIT_UPDATER_BAT``, qui logue « updater.bat demarre » sans
+# « (jeu) ») : sert à distinguer, lors du nettoyage d'un ancien
+# ``updater.bat`` laissé dans le dossier d'installation d'un jeu par une
+# version d'Actualise antérieure à l'issue #84, un fichier réellement
+# généré par Actualise d'un fichier homonyme quelconque qui ne doit
+# jamais être supprimé automatiquement.
+_MARQUE_GABARIT_BAT_JEU = "updater.bat (jeu) demarre"
+
+
+def _ancien_bat_jeu_reconnu(chemin_bat: Path) -> bool:
+    """Vrai si ``chemin_bat`` porte la marque du gabarit de mise à jour
+    jeu d'Actualise (voir ``_MARQUE_GABARIT_BAT_JEU``). Un fichier
+    illisible est traité comme non reconnu, par prudence (jamais
+    supprimé sur la base d'une lecture incertaine).
+    """
+    try:
+        contenu = chemin_bat.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return _MARQUE_GABARIT_BAT_JEU in contenu
+
+
+def _nettoyer_ancien_bat_jeu(repertoire_installation: Path) -> None:
+    """Supprime l'ancien ``updater.bat`` laissé dans
+    ``repertoire_installation`` (dossier du jeu) par une version
+    d'Actualise antérieure à l'issue #84, qui l'écrivait là plutôt que
+    sous le dossier d'Actualise — mais **seulement** s'il porte la marque
+    du gabarit jeu d'Actualise (``_ancien_bat_jeu_reconnu``). Un fichier
+    de même nom qui ne porte pas cette marque n'est jamais touché : il
+    est conservé et signalé dans le journal, pour ne pas risquer de
+    supprimer un fichier déposé par autre chose que ce mécanisme.
+
+    N'est appelée qu'une fois le nouveau bat/flag effectivement écrits
+    avec succès (voir ``_assurer_maj_jeu_en_attente``) — jamais avant,
+    pour ne jamais perdre l'ancien bat si la régénération au nouvel
+    emplacement a échoué dans cette même passe.
+    """
+    ancien_bat = repertoire_installation / "updater.bat"
+    if not ancien_bat.is_file():
+        return
+
+    if _ancien_bat_jeu_reconnu(ancien_bat):
+        try:
+            ancien_bat.unlink()
+        except OSError as erreur:
+            _LOGGER.warning(
+                "Ancien updater.bat (%s) reconnu comme généré par Actualise mais "
+                "impossible à supprimer : %s.",
+                ancien_bat,
+                erreur,
+            )
+    else:
+        _LOGGER.warning(
+            "Ancien fichier %s présent sans la marque du gabarit de mise à jour "
+            "jeu d'Actualise : conservé, non supprimé.",
+            ancien_bat,
+        )
+
+
+def _flag_jeu_perime(chemin_flag: Path, dossier_actualise: Path) -> bool:
+    """Vrai si ``chemin_flag`` (``actualise_update.flag`` déjà présent
+    dans le dossier d'installation d'un jeu) est un ancien flag de type
+    ``"jeu"`` périmé, laissé par une version d'Actualise antérieure à
+    l'issue #84 : sa clé ``"bat"`` pointe alors vers l'ancien emplacement
+    (dossier du jeu) plutôt que sous ``dossier_actualise``, chemin que le
+    code déjà déployé côté Scrabble refuse — il doit donc être régénéré
+    au nouvel emplacement plutôt que bloquer indéfiniment toute nouvelle
+    génération. Un flag de type ``"actualise"`` n'est **jamais**
+    considéré périmé par cette fonction. Un flag illisible ou malformé
+    est traité comme non périmé, par prudence (laissé intact plutôt que
+    supprimé sur la base d'une lecture incertaine).
+    """
+    try:
+        contenu = json.loads(chemin_flag.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    if contenu.get("type") != "jeu":
+        return False
+
+    chemin_bat_flag = contenu.get("bat")
+    if not chemin_bat_flag:
+        return False
+
+    try:
+        chemin_bat_resolu = Path(chemin_bat_flag).resolve()
+        dossier_actualise_resolu = dossier_actualise.resolve()
+    except OSError:
+        return False
+
+    try:
+        chemin_bat_resolu.relative_to(dossier_actualise_resolu)
+    except ValueError:
+        return True
+    return False
+
+
 def _assurer_maj_jeu_en_attente(
     nom_app: str,
     bloc_app: dict,
@@ -977,13 +1115,34 @@ def _assurer_maj_jeu_en_attente(
     flag + updater.bat déjà en place pour Actualise lui-même (voir
     CONCEPTION.md, section dédiée à la mise à jour d'un jeu).
 
+    **Validation du nom (règle de sécurité, issue #84)** : ``nom_app``
+    sert à construire le nom du bat (``updater_<nom_app>.bat``, voir
+    ``_generer_updater_bat_jeu``) — un nom invalide (vide, contenant un
+    séparateur de chemin, ``..``, un espace, un caractère accentué ou
+    tout autre caractère hors ASCII lettres/chiffres/``_``/``-``) est
+    refusé ici, avant toute écriture : rejet propre (une ligne de
+    journal, aucune exception qui remonte), aucun fichier écrit (ni bat
+    ni flag), le programme continue normalement.
+
     Ne fait **rien** — zip conservé, aucune extraction, aucun nouveau
     flag — si ``actualise_update.flag`` existe déjà dans
-    ``repertoire_installation`` : un seul type de mise à jour en attente
+    ``repertoire_installation`` **et** n'est pas un ancien flag périmé
+    (voir ``_flag_jeu_perime``) : un seul type de mise à jour en attente
     à la fois dans ce dossier (celle d'Actualise, traitée plus haut dans
     la même boucle d'appel, passe donc toujours en premier ; celle du
     jeu est alors reportée à un lancement ultérieur, une fois ce flag
     consommé).
+
+    **Nettoyage de l'existant (issue #84)** : un flag de type ``"jeu"``
+    dont la clé ``"bat"`` pointe hors du dossier d'Actualise est un
+    résidu laissé par une version antérieure à cette issue — il ne
+    bloque pas la régénération ci-dessous (il est simplement écrasé par
+    le nouveau flag en cas de succès, jamais supprimé avant) ; un ancien
+    ``updater.bat`` laissé dans ``repertoire_installation`` par cette
+    même version antérieure est supprimé par ``_nettoyer_ancien_bat_jeu``,
+    mais seulement **après** succès complet de la génération du nouveau
+    bat et du nouveau flag — jamais avant, pour ne perdre aucun état
+    utilisable si cette même passe ne peut pas régénérer.
 
     Appelée à la fois juste après le téléchargement
     (``tache_verification_arriere_plan``, pour que le bat soit prêt avant
@@ -992,16 +1151,32 @@ def _assurer_maj_jeu_en_attente(
     (``appliquer_mises_a_jour_en_attente``, qui rattrape une génération
     ayant échoué précédemment — ``OSError``/``BadZipFile`` transitoire).
     """
-    chemin_flag = repertoire_installation / _NOM_FLAG_MAJ_ACTUALISE
-    if chemin_flag.exists():
-        _LOGGER.info(
-            "Mise à jour de %s (build %s) reportée : un flag de mise à jour "
-            "est déjà en attente dans %s.",
+    if not _nom_jeu_valide(nom_app):
+        _LOGGER.error(
+            "Nom d'application cible invalide (%r) : génération du bat/flag de "
+            "mise à jour refusée, aucun fichier écrit.",
             nom_app,
-            build_zip,
-            repertoire_installation,
         )
         return
+
+    dossier_actualise = config.chemin_config_portable()
+    chemin_flag = repertoire_installation / _NOM_FLAG_MAJ_ACTUALISE
+
+    if chemin_flag.exists():
+        if not _flag_jeu_perime(chemin_flag, dossier_actualise):
+            _LOGGER.info(
+                "Mise à jour de %s (build %s) reportée : un flag de mise à jour "
+                "est déjà en attente dans %s.",
+                nom_app,
+                build_zip,
+                repertoire_installation,
+            )
+            return
+        _LOGGER.info(
+            "Flag de mise à jour périmé pour %s (ancien emplacement de bat hors "
+            "du dossier d'Actualise) : régénération au nouvel emplacement.",
+            nom_app,
+        )
 
     try:
         mise_a_jour.valider_entrees_zip(chemin_zip, repertoire_installation)
@@ -1034,23 +1209,45 @@ def _assurer_maj_jeu_en_attente(
         chemin_bat = _generer_updater_bat_jeu(
             chemin_zip,
             repertoire_installation,
+            nom_app,
+            dossier_actualise,
             chemin_flag,
-            config.chemin_config_portable() / f"config_{nom_app}.json",
+            dossier_actualise / f"config_{nom_app}.json",
             bloc_app["executable"],
             build_zip,
             entrees_racine,
         )
-        _ecrire_flag_maj(
-            repertoire_installation, chemin_bat, config.chemin_config_portable(), type_maj="jeu"
-        )
     except (OSError, zipfile.BadZipFile) as erreur:
         _LOGGER.error(
-            "Échec de la génération du bat/flag de mise à jour pour %s (build %s) : "
+            "Échec de la génération du bat de mise à jour pour %s (build %s) : "
             "%s — zip conservé pour nouvelle tentative.",
             nom_app,
             build_zip,
             erreur,
         )
+        return
+
+    try:
+        _ecrire_flag_maj(repertoire_installation, chemin_bat, dossier_actualise, type_maj="jeu")
+    except OSError as erreur:
+        # Le bat vient d'être écrit avec succès (sous dossier_actualise)
+        # mais le flag, lui, n'a pas pu l'être (ex. droits insuffisants
+        # sur repertoire_installation) — voir point 6 de l'audit #84 :
+        # ce bat serait sinon orphelin (jamais référencé par aucun flag,
+        # jamais nettoyé), on le supprime donc explicitement ici. Le zip
+        # reste en attente pour une nouvelle tentative complète au
+        # prochain cycle.
+        _LOGGER.error(
+            "Échec de l'écriture du flag de mise à jour pour %s (bat généré mais "
+            "flag non écrit, %s) : bat orphelin supprimé, zip conservé pour "
+            "nouvelle tentative.",
+            nom_app,
+            erreur,
+        )
+        chemin_bat.unlink(missing_ok=True)
+        return
+
+    _nettoyer_ancien_bat_jeu(repertoire_installation)
 
 
 def _url_asset_release(depot_github: str, build: int, prefixe: str) -> str:
