@@ -30,6 +30,20 @@ def analyser_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return analyseur.parse_args(argv)
 
 
+def construire_commande_maj(chemin_bat: Path, relancer: str | None) -> list[str]:
+    """Commande pour lancer ``updater.bat`` via ``cmd /c`` (sans shell=True).
+
+    ``updater.bat`` n'est pas un exécutable PE : Windows a besoin de
+    ``cmd.exe`` pour l'interpréter, d'où l'appel explicite à ``cmd /c``
+    plutôt qu'un lancement direct. Les arguments sont passés en liste
+    pour éviter toute réinterprétation par un shell.
+    """
+    commande = ["cmd", "/c", str(chemin_bat)]
+    if relancer:
+        commande += ["--relancer", relancer]
+    return commande
+
+
 def main(argv: list[str] | None = None) -> None:
     arguments = analyser_arguments(argv)
     chemin_bat = Path(arguments.bat)
@@ -44,6 +58,8 @@ def main(argv: list[str] | None = None) -> None:
         # barre des tâches. Attribut spécifique à Windows.
         fenetre.attributes("-toolwindow", True)
     except tk.TclError:
+        # Repli volontaire : "-toolwindow" est un attribut propre à Windows,
+        # absent sur les autres plateformes (p. ex. Linux en test local).
         pass
 
     def plus_tard() -> None:
@@ -51,10 +67,8 @@ def main(argv: list[str] | None = None) -> None:
 
     def mettre_a_jour() -> None:
         chemin_flag.unlink(missing_ok=True)
-        commande = f'"{chemin_bat}"'
-        if arguments.relancer:
-            commande += f' --relancer "{arguments.relancer}"'
-        subprocess.Popen(commande, shell=True)
+        commande = construire_commande_maj(chemin_bat, arguments.relancer)
+        subprocess.Popen(commande)
         fenetre.destroy()
 
     fenetre.protocol("WM_DELETE_WINDOW", plus_tard)
