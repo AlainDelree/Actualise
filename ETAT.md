@@ -35,7 +35,8 @@
 7. Lancer Scrabble
 
 ## Processus de build et de publication
-- `build\rebuild_actualise_unifie.bat --publier [--build N]` (issue #67)
+- `build\rebuild_actualise.bat --publier [--build N]` (issue #67 ;
+  renommé depuis `rebuild_actualise_unifie.bat` par l'issue #70)
   construit l'exécutable, l'installeur et l'archive, écrit
   `version.json` et fait un commit local ; il ne pousse jamais et ne
   crée jamais de Release — il recopie l'installeur et l'archive vers
@@ -48,17 +49,13 @@
 - Builds CCW sur le PC fixe Windows (partage Samba) validés le 20 août 2026 :
   chaîne PyInstaller + ISCC fonctionnelle, Actualise-Setup-v9.exe produit
   sans erreur.
-- verifier_installation.py existe comme script standalone (pas dans un dépôt)
+- `verifier_installation.py` existe comme script standalone, hors dépôt
+  (sur le PC Windows d'Alain, non versionné)
 - Cause exacte de l'échec d'extraction observé en Program Files (droits
   insuffisants, ou fichiers verrouillés parce que l'application cible —
   qui lance Actualise à son démarrage — tourne encore) non tranchée ;
   issue #66 traite la façon d'échouer (non fatal, zip conservé) mais pas
   la cause elle-même — à trancher par un test en conditions réelles.
-- `build\rebuild_actualise_unifie.bat` a un nom provisoire : à renommer
-  `rebuild_actualise.bat` dans une issue ultérieure, après quoi les trois
-  anciens scripts (rebuild_actualise.bat, rebuild_actualise_setup.bat,
-  publier_actualise.bat) seront retirés, ainsi que les commentaires qui
-  les citent (.gitignore, installeur\actualise.iss, actualise.spec).
 - Fiabilisation de updater.bat à prévoir (issue pas encore créée) :
   constaté qu'ActualiseUI.exe n'est pas remplacé par la bascule (garde
   la date du build précédent) ; constaté aussi, lors d'un test réel
