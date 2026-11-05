@@ -1112,6 +1112,7 @@ class TestGabaritUpdaterBat(unittest.TestCase):
             env=env,
             timeout=timeout,
             capture_output=True,
+            check=False,
         )
 
     def _journal(self) -> str:
@@ -1344,6 +1345,7 @@ class TestGabaritUpdaterBatJeu(unittest.TestCase):
             env=env,
             timeout=timeout,
             capture_output=True,
+            check=False,
         )
 
     def _journal(self) -> str:
