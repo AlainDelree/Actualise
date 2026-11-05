@@ -19,6 +19,7 @@ from mise_a_jour import (
     appliquer_manifeste,
     extraire_zip,
     telecharger_zip,
+    valider_entrees_zip,
     verifier_sha256,
 )
 
@@ -116,6 +117,40 @@ class TestExtraireZip(unittest.TestCase):
 
         chemin_evasion = Path(self.dossier_temp.name) / "evasion.txt"
         self.assertFalse(chemin_evasion.exists())
+
+
+class TestValiderEntreesZip(unittest.TestCase):
+    """Garde anti-évasion de chemin exposée séparément de l'extraction,
+    pour les chemins d'extraction différée (ex. PowerShell
+    ``Expand-Archive`` côté jeu) — voir SEC-025, audit issue #92.
+    """
+
+    def setUp(self):
+        self.dossier_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dossier_temp.cleanup)
+
+    def _creer_zip(self, entrees: dict) -> Path:
+        chemin_zip = Path(self.dossier_temp.name) / "source.zip"
+        with zipfile.ZipFile(chemin_zip, "w") as archive:
+            for nom, contenu in entrees.items():
+                archive.writestr(nom, contenu)
+        return chemin_zip
+
+    def test_entrees_normales_ne_levent_rien(self):
+        chemin_zip = self._creer_zip({"a.txt": "A", "sous_dossier/b.txt": "B"})
+        destination = Path(self.dossier_temp.name) / "destination"
+
+        valider_entrees_zip(chemin_zip, destination)
+
+    def test_evasion_leve_valueerror_sans_rien_extraire(self):
+        chemin_zip = self._creer_zip({"../evasion.txt": "malveillant"})
+        destination = Path(self.dossier_temp.name) / "destination"
+
+        with self.assertRaises(ValueError):
+            valider_entrees_zip(chemin_zip, destination)
+
+        self.assertFalse((Path(self.dossier_temp.name) / "evasion.txt").exists())
+        self.assertFalse(destination.exists())
 
 
 class TestAppliquerManifeste(unittest.TestCase):

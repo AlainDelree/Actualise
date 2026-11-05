@@ -13,6 +13,7 @@ lançant pour de vrai. Ces tests ne font aucun appel réseau et ne sont
 actifs que sous Windows (``os.name == "nt"``).
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -51,6 +52,19 @@ def _creer_zip_avec_manifest_bom_utf8(chemin_zip: Path, build: int, supprimer=No
             "manifest.json", b"\xef\xbb\xbf" + json.dumps(manifest).encode("utf-8")
         )
         archive.writestr("fichier.txt", "contenu")
+
+
+def _chemin_empreinte(chemin_zip: Path) -> Path:
+    return chemin_zip.with_name(chemin_zip.name + ".sha256")
+
+
+def _creer_empreinte_valide(chemin_zip: Path) -> None:
+    """Écrit le sidecar d'empreinte SHA-256 correct pour ``chemin_zip``,
+    pour simuler l'état normal laissé par ``tache_verification_arriere_plan``
+    après téléchargement — voir SEC-022 (audit issue #92).
+    """
+    hachage = hashlib.sha256(chemin_zip.read_bytes()).hexdigest()
+    _chemin_empreinte(chemin_zip).write_text(hachage, encoding="utf-8")
 
 
 class TestAppliquerMisesAJourEnAttenteEnfant(unittest.TestCase):
@@ -102,6 +116,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         # plus tard par le jeu lui-même à sa fermeture.
         chemin_zip = self.zone_attente / "scrabble_48.zip"
         _creer_zip_avec_manifest(chemin_zip, build=48)
+        _creer_empreinte_valide(chemin_zip)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour, patch(
             "actualise._generer_updater_bat_jeu"
@@ -134,6 +149,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
     def test_manifest_avec_bom_utf8_est_lu_correctement(self):
         chemin_zip = self.zone_attente / "scrabble_48.zip"
         _creer_zip_avec_manifest_bom_utf8(chemin_zip, build=48)
+        _creer_empreinte_valide(chemin_zip)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour, patch(
             "actualise._generer_updater_bat_jeu"
@@ -168,6 +184,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
     def test_zip_actualise_valide_relance_enfant_et_termine(self):
         chemin_zip = self.zone_attente / "actualise_11.zip"
         _creer_zip_avec_manifest(chemin_zip, build=11)
+        _creer_empreinte_valide(chemin_zip)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour, patch(
             "actualise._relancer_en_enfant"
@@ -199,6 +216,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         # directe dans le dossier de l'exécutable en cours d'exécution.
         chemin_zip = self.zone_attente / "actualise_11.zip"
         _creer_zip_avec_manifest(chemin_zip, build=11)
+        _creer_empreinte_valide(chemin_zip)
 
         with patch("actualise._relancer_en_enfant") as mock_relancer:
             with self.assertRaises(SystemExit):
@@ -222,6 +240,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
     def test_echec_renommage_bascule_actualise_zip_conserve_aucune_exception(self):
         chemin_zip = self.zone_attente / "actualise_11.zip"
         _creer_zip_avec_manifest(chemin_zip, build=11)
+        _creer_empreinte_valide(chemin_zip)
 
         with patch(
             "actualise._basculer_par_renommage",
@@ -271,6 +290,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         # Actualise, jamais de build_installe modifié dans ce cas.
         chemin_zip = self.zone_attente / "scrabble_48.zip"
         _creer_zip_avec_manifest(chemin_zip, build=48)
+        _creer_empreinte_valide(chemin_zip)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour, patch(
             "actualise._generer_updater_bat_jeu",
@@ -299,6 +319,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         # n'applique rien de plus tant qu'il n'a pas été consommé.
         chemin_zip = self.zone_attente / "scrabble_48.zip"
         _creer_zip_avec_manifest(chemin_zip, build=48)
+        _creer_empreinte_valide(chemin_zip)
         chemin_flag = self.repertoire_cible / "actualise_update.flag"
         chemin_flag.write_text(json.dumps({"type": "actualise"}), encoding="utf-8")
 
@@ -332,6 +353,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         chemin_zip_haut = self.zone_attente / "scrabble_49.zip"
         _creer_zip_avec_manifest(chemin_zip_bas, build=48)
         _creer_zip_avec_manifest(chemin_zip_haut, build=49)
+        _creer_empreinte_valide(chemin_zip_haut)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour, patch(
             "actualise._generer_updater_bat_jeu"
@@ -356,6 +378,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         chemin_zip = self.zone_attente / "scrabble_48.zip"
         with zipfile.ZipFile(chemin_zip, "w") as archive:
             archive.writestr("fichier.txt", "contenu")
+        _creer_empreinte_valide(chemin_zip)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
             appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
@@ -371,6 +394,7 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
     def test_zip_corrompu_zip_conserve_aucune_bascule(self):
         chemin_zip = self.zone_attente / "scrabble_48.zip"
         chemin_zip.write_text("ceci n'est pas un zip")
+        _creer_empreinte_valide(chemin_zip)
 
         with patch("actualise.mise_a_jour") as mock_mise_a_jour:
             appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
@@ -382,6 +406,114 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
         self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
         self.mock_config.sauvegarder_config_actualise.assert_not_called()
         self.mock_config.sauvegarder_config_app.assert_not_called()
+
+    def test_zip_altere_hash_invalide_non_applique_et_retire(self):
+        # SEC-022 (audit issue #92) : un zip en attente altéré sur le
+        # disque entre le téléchargement et ce lancement ne doit jamais
+        # être appliqué — l'empreinte re-vérifiée ici ne correspond plus
+        # au contenu actuel du zip.
+        chemin_zip = self.zone_attente / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+        _chemin_empreinte(chemin_zip).write_text("0" * 64, encoding="utf-8")
+
+        with patch("actualise._generer_updater_bat_jeu") as mock_generer_bat_jeu, patch(
+            "actualise._ecrire_flag_maj"
+        ) as mock_ecrire_flag, self.assertLogs("actualise", level="WARNING") as journal:
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+
+            mock_generer_bat_jeu.assert_not_called()
+            mock_ecrire_flag.assert_not_called()
+
+        self.assertFalse(chemin_zip.exists())
+        self.assertFalse(_chemin_empreinte(chemin_zip).exists())
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
+        self.assertTrue(any("empreinte" in message.lower() for message in journal.output))
+
+    def test_empreinte_absente_non_applique_retire_pour_retelechargement(self):
+        # Zip mis en attente par une version d'Actualise antérieure à ce
+        # correctif (pas de sidecar d'empreinte à côté) : aucun moyen de
+        # revérifier son intégrité, donc jamais appliqué fail-safe —
+        # retiré pour être retéléchargé (avec son empreinte, cette fois)
+        # au prochain contrôle.
+        chemin_zip = self.zone_attente / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip, build=48)
+
+        with patch("actualise._generer_updater_bat_jeu") as mock_generer_bat_jeu, patch(
+            "actualise._ecrire_flag_maj"
+        ) as mock_ecrire_flag, self.assertLogs("actualise", level="WARNING") as journal:
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+
+            mock_generer_bat_jeu.assert_not_called()
+            mock_ecrire_flag.assert_not_called()
+
+        self.assertFalse(chemin_zip.exists())
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
+        self.assertTrue(any("empreinte" in message.lower() for message in journal.output))
+
+    def test_evasion_chemin_actualise_rejet_propre_sans_crash(self):
+        # SEC-025 (audit issue #92) : une évasion de chemin détectée
+        # pendant l'extraction Python de l'auto-mise-à-jour d'Actualise
+        # levait auparavant une ValueError non rattrapée (seul un
+        # ``except OSError`` l'entourait), qui remontait jusqu'à planter
+        # le programme. Doit désormais être un saut propre : rien
+        # appliqué, zip rejeté, pas d'exception.
+        chemin_zip = self.zone_attente / "actualise_11.zip"
+        with zipfile.ZipFile(chemin_zip, "w") as archive:
+            archive.writestr("manifest.json", json.dumps({"build": 11, "supprimer": []}))
+            archive.writestr("../evasion.txt", "malveillant")
+        _creer_empreinte_valide(chemin_zip)
+
+        with patch("actualise._relancer_en_enfant") as mock_relancer, self.assertLogs(
+            "actualise", level="ERROR"
+        ) as journal:
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+
+            mock_relancer.assert_not_called()
+
+        self.assertFalse(chemin_zip.exists())
+        self.assertFalse(_chemin_empreinte(chemin_zip).exists())
+        self.assertFalse((self.dossier_actualise / "evasion.txt").exists())
+        self.assertEqual(self.configuration["actualise"]["build_installe"], 10)
+        self.mock_config.sauvegarder_config_actualise.assert_not_called()
+        self.assertTrue(any("vasion" in message.lower() for message in journal.output))
+
+        # Pas de rejeu au lancement suivant : le zip a été retiré, un
+        # second appel ne retente rien (aucune relance enfant).
+        with patch("actualise._relancer_en_enfant") as mock_relancer_2:
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+            mock_relancer_2.assert_not_called()
+
+    def test_evasion_chemin_jeu_rejet_propre_sans_crash_ni_rejeu(self):
+        # SEC-025 (audit issue #92) : l'extraction du zip d'un jeu se
+        # fait plus tard par PowerShell (``Expand-Archive``) dans le bat
+        # généré, qui n'a pas la garde anti-évasion de mise_a_jour.py —
+        # elle doit donc être appliquée côté Python avant même de
+        # générer/lancer ce bat. Rien n'est généré ni appliqué, le zip
+        # est rejeté et n'est pas rejoué au lancement suivant.
+        chemin_zip = self.zone_attente / "scrabble_48.zip"
+        with zipfile.ZipFile(chemin_zip, "w") as archive:
+            archive.writestr("manifest.json", json.dumps({"build": 48, "supprimer": []}))
+            archive.writestr("../evasion.txt", "malveillant")
+        _creer_empreinte_valide(chemin_zip)
+
+        with patch("actualise._generer_updater_bat_jeu") as mock_generer_bat_jeu, patch(
+            "actualise._ecrire_flag_maj"
+        ) as mock_ecrire_flag, self.assertLogs("actualise", level="ERROR") as journal:
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+
+            mock_generer_bat_jeu.assert_not_called()
+            mock_ecrire_flag.assert_not_called()
+
+        self.assertFalse(chemin_zip.exists())
+        self.assertFalse(_chemin_empreinte(chemin_zip).exists())
+        self.assertFalse((self.racine / "evasion.txt").exists())
+        self.assertEqual(self.configuration["application_cible"]["build_installe"], 47)
+        self.assertTrue(any("vasion" in message.lower() for message in journal.output))
+
+        # Pas de rejeu au lancement suivant : le zip a été retiré.
+        with patch("actualise._generer_updater_bat_jeu") as mock_generer_bat_jeu_2:
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+            mock_generer_bat_jeu_2.assert_not_called()
 
     def test_zone_attente_inexistante_aucune_exception(self):
         self.zone_attente.rmdir()

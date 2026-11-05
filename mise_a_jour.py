@@ -88,6 +88,25 @@ def _verifier_chemin_dans_destination(chemin_cible: Path, destination_resolue: P
         )
 
 
+def valider_entrees_zip(chemin_zip: Path, destination: Path) -> None:
+    """Lève ``ValueError`` si un membre de ``chemin_zip`` s'évaderait de
+    ``destination`` une fois extrait (pattern « zip slip » : ex.
+    ``../../fichier``), sans rien extraire.
+
+    Même garde que celle utilisée par ``extraire_zip``, exposée ici pour
+    les chemins d'extraction différée (ex. ``Expand-Archive`` PowerShell
+    dans un ``updater.bat`` généré) où l'extraction elle-même n'est pas
+    faite par ce module : valider les entrées avant de générer/lancer un
+    tel script évite de reposer sur sa propre protection anti-évasion,
+    potentiellement absente.
+    """
+    destination_resolue = destination.resolve()
+    with zipfile.ZipFile(chemin_zip) as archive:
+        for membre in archive.namelist():
+            chemin_cible = (destination_resolue / membre).resolve()
+            _verifier_chemin_dans_destination(chemin_cible, destination_resolue)
+
+
 def extraire_zip(chemin_zip: Path, destination: Path) -> None:
     """Extrait ``chemin_zip`` dans ``destination``, en écrasant les
     fichiers existants de même nom et en ajoutant les nouveaux.
@@ -98,15 +117,12 @@ def extraire_zip(chemin_zip: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     destination_resolue = destination.resolve()
 
-    with zipfile.ZipFile(chemin_zip) as archive:
-        # Chaque chemin est validé avant toute extraction, pour ne
-        # jamais écrire un seul fichier hors de ``destination`` même si
-        # un membre plus loin dans l'archive s'avère malveillant
-        # (pattern « zip slip » : ex. ``../../fichier``).
-        for membre in archive.namelist():
-            chemin_cible = (destination_resolue / membre).resolve()
-            _verifier_chemin_dans_destination(chemin_cible, destination_resolue)
+    # Chaque chemin est validé avant toute extraction, pour ne jamais
+    # écrire un seul fichier hors de ``destination`` même si un membre
+    # plus loin dans l'archive s'avère malveillant.
+    valider_entrees_zip(chemin_zip, destination_resolue)
 
+    with zipfile.ZipFile(chemin_zip) as archive:
         archive.extractall(destination_resolue)
 
 

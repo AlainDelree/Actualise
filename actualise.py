@@ -69,6 +69,22 @@ def _prefixe_pour(nom: str) -> str:
     return nom.lower()
 
 
+def _chemin_empreinte_zip(chemin_zip: Path) -> Path:
+    """Chemin du fichier sidecar contenant l'empreinte SHA-256 attendue
+    pour ``chemin_zip`` en zone d'attente.
+
+    Écrit par ``tache_verification_arriere_plan`` juste après le
+    téléchargement (déjà vérifié à ce moment via
+    ``mise_a_jour.telecharger_zip``), re-lu par
+    ``appliquer_mises_a_jour_en_attente`` pour re-vérifier l'intégrité
+    juste avant application — voir SEC-022 (audit issue #92) : un zip
+    en attente altéré sur le disque entre le téléchargement et le
+    lancement suivant ne doit jamais être appliqué sans nouveau
+    contrôle.
+    """
+    return chemin_zip.with_name(chemin_zip.name + ".sha256")
+
+
 def _chercher_zip_en_attente(zone_attente: Path, prefixe: str) -> tuple[Path, int] | None:
     """Cherche dans ``zone_attente`` un fichier ``<prefixe>_<build>.zip``.
 
@@ -102,6 +118,7 @@ def _chercher_zip_en_attente(zone_attente: Path, prefixe: str) -> tuple[Path, in
     meilleur, *residus = candidats
     for chemin_residu, _ in residus:
         chemin_residu.unlink()
+        _chemin_empreinte_zip(chemin_residu).unlink(missing_ok=True)
 
     return meilleur
 
@@ -263,6 +280,45 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                 # CONCEPTION.md « Nommage versionné des zips en zone
                 # d'attente ».
                 chemin_zip.unlink()
+                _chemin_empreinte_zip(chemin_zip).unlink(missing_ok=True)
+                continue
+
+            chemin_empreinte = _chemin_empreinte_zip(chemin_zip)
+            try:
+                empreinte_attendue = chemin_empreinte.read_text(encoding="utf-8").strip()
+            except OSError:
+                empreinte_attendue = None
+
+            if empreinte_attendue is None:
+                # Zip en attente sans empreinte enregistrée (ex. mis en
+                # attente par une version d'Actualise antérieure à ce
+                # correctif, ou sidecar perdu) : aucun moyen de revérifier
+                # son intégrité, donc jamais appliqué fail-safe — voir
+                # SEC-022 (audit issue #92). Retiré pour être retéléchargé
+                # (avec son empreinte) au prochain contrôle.
+                _LOGGER.warning(
+                    "Empreinte SHA-256 absente pour le zip de mise à jour en "
+                    "attente (%s) : zip retiré, sera retéléchargé au prochain "
+                    "contrôle.",
+                    chemin_zip,
+                )
+                chemin_zip.unlink()
+                continue
+
+            if not mise_a_jour.verifier_sha256(chemin_zip, empreinte_attendue):
+                # Empreinte présente mais ne correspondant plus au zip
+                # (altération sur le disque entre le téléchargement et ce
+                # lancement) : rejeté fail-safe, jamais appliqué — voir
+                # SEC-022. Le zip altéré est retiré (pas seulement
+                # ignoré) pour ne pas être rejoué à chaque lancement.
+                _LOGGER.warning(
+                    "Empreinte SHA-256 invalide pour le zip de mise à jour en "
+                    "attente (%s) : zip rejeté, sera retéléchargé au prochain "
+                    "contrôle.",
+                    chemin_zip,
+                )
+                chemin_zip.unlink()
+                chemin_empreinte.unlink(missing_ok=True)
                 continue
 
             try:
@@ -309,7 +365,22 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                 with tempfile.TemporaryDirectory(
                     dir=repertoire_installation, prefix="maj_temp_"
                 ) as dossier_temp:
-                    mise_a_jour.extraire_zip(chemin_zip, Path(dossier_temp))
+                    try:
+                        mise_a_jour.extraire_zip(chemin_zip, Path(dossier_temp))
+                    except ValueError as erreur:
+                        # Évasion de chemin détectée dans le zip (pattern
+                        # « zip slip ») — voir SEC-025 (audit issue #92) :
+                        # saut propre, rien n'est appliqué, le zip est
+                        # rejeté plutôt que rejoué à chaque lancement.
+                        _LOGGER.error(
+                            "Zip de mise à jour d'Actualise rejeté (évasion de "
+                            "chemin détectée, %s) : bascule ignorée, zip rejeté.",
+                            erreur,
+                        )
+                        chemin_zip.unlink()
+                        chemin_empreinte.unlink(missing_ok=True)
+                        continue
+
                     try:
                         _basculer_par_renommage(Path(dossier_temp), repertoire_installation)
                     except OSError as erreur:
@@ -328,6 +399,7 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                     configuration["actualise"], configuration["zone_attente"]
                 )
                 chemin_zip.unlink()
+                chemin_empreinte.unlink(missing_ok=True)
 
                 # Une nouvelle version d'Actualise vient d'être installée :
                 # on relance la version fraîchement installée comme 2ème
@@ -932,6 +1004,32 @@ def _assurer_maj_jeu_en_attente(
         return
 
     try:
+        mise_a_jour.valider_entrees_zip(chemin_zip, repertoire_installation)
+    except ValueError as erreur:
+        # Évasion de chemin détectée dans le zip (pattern « zip slip ») —
+        # voir SEC-025 (audit issue #92) : l'extraction de ce zip se fait
+        # plus tard, par PowerShell (``Expand-Archive``) dans le bat
+        # généré ci-dessous, qui n'a pas la garde anti-évasion de
+        # ``mise_a_jour.py`` — on valide donc ici, avec cette même garde,
+        # avant même de générer/lancer ce chemin d'extraction. Rejeté
+        # fail-safe, rien n'est généré ni appliqué, le zip est retiré pour
+        # ne pas être rejoué à chaque lancement.
+        _LOGGER.error(
+            "Zip de mise à jour de %s rejeté (évasion de chemin détectée, "
+            "%s) : zip retiré, sera retéléchargé au prochain contrôle.",
+            nom_app,
+            erreur,
+        )
+        chemin_zip.unlink(missing_ok=True)
+        _chemin_empreinte_zip(chemin_zip).unlink(missing_ok=True)
+        return
+    except zipfile.BadZipFile:
+        # Zip illisible : transitoire, laissé à la lecture du manifeste
+        # (``appliquer_mises_a_jour_en_attente``) ou à la tentative
+        # ci-dessous, qui logue et conserve le zip pour nouvelle tentative.
+        pass
+
+    try:
         entrees_racine = _lister_entrees_racine_zip(chemin_zip)
         chemin_bat = _generer_updater_bat_jeu(
             chemin_zip,
@@ -1009,6 +1107,12 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
 
             chemin_zone_attente = zone_attente / f"{prefixe}_{build_distant}.zip"
             shutil.move(str(chemin_telecharge), str(chemin_zone_attente))
+            # Empreinte conservée à côté du zip, pour re-vérification
+            # juste avant application au prochain lancement — voir
+            # SEC-022 (audit issue #92) et ``_chemin_empreinte_zip``.
+            _chemin_empreinte_zip(chemin_zone_attente).write_text(
+                distant["sha256"], encoding="utf-8"
+            )
 
             if prefixe == "actualise":
                 # Actualise ne peut pas se remplacer lui-même pendant
