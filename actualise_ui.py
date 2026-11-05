@@ -30,18 +30,29 @@ def analyser_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return analyseur.parse_args(argv)
 
 
-def construire_commande_maj(chemin_bat: Path, relancer: str | None) -> list[str]:
+def construire_commande_maj(chemin_bat: Path, relancer: str | None) -> str:
     """Commande pour lancer ``updater.bat`` via ``cmd /c`` (sans shell=True).
 
     ``updater.bat`` n'est pas un exécutable PE : Windows a besoin de
     ``cmd.exe`` pour l'interpréter, d'où l'appel explicite à ``cmd /c``
-    plutôt qu'un lancement direct. Les arguments sont passés en liste
-    pour éviter toute réinterprétation par un shell.
+    plutôt qu'un lancement direct.
+
+    ``cmd /c`` retire le premier et le dernier guillemet de la ligne qui
+    suit dès que celle-ci en compte plus de deux au total — ce qui casse
+    les chemins si le bat ET l'exécutable à relancer contiennent chacun
+    un espace (ex. installation sous ``C:\\Program Files\\...``, quotée
+    par ``list2cmdline``). Pour obtenir le même comportement qu'avant
+    avec ``shell=True`` (qui entourait toute la ligne d'une paire de
+    guillemets supplémentaire avant de la passer à ``cmd.exe``), on
+    reproduit ici cette paire de guillemets explicitement : la partie
+    interne est quotée par ``subprocess.list2cmdline``, puis entourée
+    de guillemets, de sorte que le retrait fait par ``cmd /c`` porte sur
+    cette paire externe et laisse les guillemets internes intacts.
     """
-    commande = ["cmd", "/c", str(chemin_bat)]
+    partie_interne = [str(chemin_bat)]
     if relancer:
-        commande += ["--relancer", relancer]
-    return commande
+        partie_interne += ["--relancer", relancer]
+    return f'cmd /c "{subprocess.list2cmdline(partie_interne)}"'
 
 
 def main(argv: list[str] | None = None) -> None:
