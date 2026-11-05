@@ -58,13 +58,15 @@ l'ordre de publication manuel recommandé).
 
 ## Tests
 
-Suite complète : `pytest`.
+Suite complète : `python3 -m unittest discover -s tests`.
 
-Les tests de `TestGabaritUpdaterBat` et `TestGabaritUpdaterBatJeu`
-(exécution réelle d'`updater.bat`, actifs uniquement sous Windows) sont
-marqués `lent` car ils enchaînent des attentes réelles (subprocess,
-`time.sleep`). Pour une exécution rapide qui les exclut :
-`pytest -m "not lent"`.
+Si `pytest` est installé (facultatif, absent de `requirements.txt`),
+il peut aussi être utilisé : `pytest`. Les tests de
+`TestGabaritUpdaterBat` et `TestGabaritUpdaterBatJeu` (exécution réelle
+d'`updater.bat`, actifs uniquement sous Windows) sont alors marqués
+`lent` (via `tests/conftest.py`, lu uniquement par `pytest`) car ils
+enchaînent des attentes réelles (subprocess, `time.sleep`). Pour une
+exécution rapide qui les exclut : `pytest -m "not lent"`.
 
 ## État actuel
 
