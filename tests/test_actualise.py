@@ -536,11 +536,12 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
     def test_config_incomplete_keyerror_levee_avec_log_derreur(self):
         del self.configuration["application_cible"]
 
-        with patch("actualise.mise_a_jour"), self.assertLogs(
-            "actualise", level="ERROR"
-        ) as journal:
-            with self.assertRaises(KeyError):
-                appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+        with (
+            patch("actualise.mise_a_jour"),
+            self.assertLogs("actualise", level="ERROR") as journal,
+            self.assertRaises(KeyError),
+        ):
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
 
         self.assertTrue(any("config_actualise.json" in message for message in journal.output))
 
@@ -929,7 +930,7 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
 
             mock_generer_bat_jeu.assert_called_once()
             (
-                chemin_zip_appele,
+                _chemin_zip_appele,
                 dossier_appele,
                 nom_appele,
                 dossier_actualise_appele,
@@ -1035,19 +1036,25 @@ class TestMain(unittest.TestCase):
         self.mock_config.chemin_config_portable.return_value = Path(self.dossier_temp.name)
 
     def test_exception_fatale_dans_main_loguee_et_propagee(self):
-        with patch(
-            "actualise.appliquer_mises_a_jour_en_attente", side_effect=RuntimeError("boum fatal")
-        ), self.assertLogs("actualise", level="ERROR") as journal:
-            with self.assertRaises(RuntimeError):
-                main(["--config", "scrabble"])
+        with (
+            patch(
+                "actualise.appliquer_mises_a_jour_en_attente",
+                side_effect=RuntimeError("boum fatal"),
+            ),
+            self.assertLogs("actualise", level="ERROR") as journal,
+            self.assertRaises(RuntimeError),
+        ):
+            main(["--config", "scrabble"])
 
         self.assertTrue(any("erreur fatale" in message for message in journal.output))
 
     def test_systemexit_relance_enfant_non_intercepte_ni_logue_comme_erreur(self):
-        with patch("actualise.appliquer_mises_a_jour_en_attente", side_effect=SystemExit(0)):
-            with self.assertNoLogs("actualise", level="ERROR"):
-                with self.assertRaises(SystemExit):
-                    main(["--config", "scrabble"])
+        with (
+            patch("actualise.appliquer_mises_a_jour_en_attente", side_effect=SystemExit(0)),
+            self.assertNoLogs("actualise", level="ERROR"),
+            self.assertRaises(SystemExit),
+        ):
+            main(["--config", "scrabble"])
 
 
 def _creer_installation_actualise(dossier: Path) -> None:
@@ -1184,8 +1191,10 @@ class TestGabaritUpdaterBat(unittest.TestCase):
                 "powershell",
                 "-NoProfile",
                 "-Command",
-                f"$fs = [System.IO.File]::Open('{chemin_exe}', 'Open', 'ReadWrite', 'None'); "
-                "Start-Sleep -Seconds 8; $fs.Close()",
+                (
+                    f"$fs = [System.IO.File]::Open('{chemin_exe}', 'Open', 'ReadWrite', 'None'); "
+                    "Start-Sleep -Seconds 8; $fs.Close()"
+                ),
             ]
         )
         try:
@@ -1401,8 +1410,10 @@ class TestGabaritUpdaterBatJeu(unittest.TestCase):
                 "powershell",
                 "-NoProfile",
                 "-Command",
-                f"$fs = [System.IO.File]::Open('{chemin_exe}', 'Open', 'ReadWrite', 'None'); "
-                "Start-Sleep -Seconds 8; $fs.Close()",
+                (
+                    f"$fs = [System.IO.File]::Open('{chemin_exe}', 'Open', 'ReadWrite', 'None'); "
+                    "Start-Sleep -Seconds 8; $fs.Close()"
+                ),
             ]
         )
         try:

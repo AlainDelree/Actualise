@@ -25,7 +25,7 @@ class TestNotifierNtfy(unittest.TestCase):
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
         self.assertEqual(args[0], "https://ntfy.sh/mon-topic")
-        self.assertEqual(kwargs["data"], "un message".encode("utf-8"))
+        self.assertEqual(kwargs["data"], "un message".encode())
 
     @patch("notifications.requests.post")
     def test_timeout_reseau_ne_leve_pas_exception(self, mock_post):

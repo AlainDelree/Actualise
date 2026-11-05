@@ -14,8 +14,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from config import (
-    chemin_config_portable,
     charger_config,
+    chemin_config_portable,
     sauvegarder_config_actualise,
     sauvegarder_config_app,
 )
