@@ -1,0 +1,10 @@
+{
+  "cas": ["C1", "C7"],
+  "donnees_personnelles": [],
+  "exceptions": [
+    {
+      "regle": "SEC-023",
+      "raison": "2026-11-05 — Actualise ne met à jour que mes applications à usage familial, depuis mon propre dépôt GitHub, téléchargé en https. L'empreinte transite par le même canal que l'archive (risque connu et assumé). Accepté tant que mon compte GitHub reste protégé par une double authentification forte et que ces applications ne sont diffusées qu'à mon entourage ; à revoir si elles sont diffusées plus largement, si le compte ou le PC de publication est compromis, ou dans un an."
+    }
+  ]
+}
