@@ -5,6 +5,10 @@
     {
       "regle": "SEC-023",
       "raison": "2026-11-05 — Actualise ne met à jour que mes applications à usage familial, depuis mon propre dépôt GitHub, téléchargé en https. L'empreinte transite par le même canal que l'archive (risque connu et assumé). Accepté tant que mon compte GitHub reste protégé par une double authentification forte et que ces applications ne sont diffusées qu'à mon entourage ; à revoir si elles sont diffusées plus largement, si le compte ou le PC de publication est compromis, ou dans un an."
+    },
+    {
+      "regle": "SEC-022",
+      "raison": "2026-11-05 — L'empreinte est contrôlée au téléchargement, puis à chaque exécution d'Actualise pour les jeux et pour Actualise lui-même quand aucun fichier-drapeau n'existe, mais pas entre la génération du bat et son lancement (voir CONCEPTION.md). Limite acceptée : altérer le zip suppose déjà un accès en écriture au dossier d'Actualise, où se trouve aussi le bat ; ce droit est accordé à tous les utilisateurs locaux du PC par l'installeur de Scrabble, risque accepté sur un PC familial. À revoir en même temps que SEC-023."
     }
   ]
 }
