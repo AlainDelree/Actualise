@@ -26,6 +26,8 @@ import zipfile
 from pathlib import Path
 from unittest.mock import call, patch
 
+import pytest
+
 from actualise import (
     _generer_updater_bat,
     _generer_updater_bat_jeu,
@@ -842,6 +844,7 @@ def _creer_zip_mise_a_jour(chemin_zip: Path) -> None:
         archive.writestr("ActualiseUI.exe", "nouveau-actualise-ui-exe")
 
 
+@pytest.mark.lent
 @unittest.skipUnless(os.name == "nt", "updater.bat est un script Windows (cmd.exe)")
 class TestGabaritUpdaterBat(unittest.TestCase):
     """Exécute réellement ``updater.bat`` (voir issue #68) dans un
@@ -1053,6 +1056,7 @@ def _creer_zip_mise_a_jour_jeu(chemin_zip: Path, nom_exe: str) -> None:
         archive.writestr("data/fichier.txt", "nouveau")
 
 
+@pytest.mark.lent
 @unittest.skipUnless(os.name == "nt", "updater.bat est un script Windows (cmd.exe)")
 class TestGabaritUpdaterBatJeu(unittest.TestCase):
     """Exécute réellement le ``updater.bat`` généré pour un jeu (voir

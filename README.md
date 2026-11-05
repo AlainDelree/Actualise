@@ -56,6 +56,16 @@ Pour reconstruire et publier un nouveau build : `build\rebuild_actualise.bat
 --publier [--build N]` (voir ETAT.md pour le détail du processus et
 l'ordre de publication manuel recommandé).
 
+## Tests
+
+Suite complète : `pytest`.
+
+Les tests de `TestGabaritUpdaterBat` et `TestGabaritUpdaterBatJeu`
+(exécution réelle d'`updater.bat`, actifs uniquement sous Windows) sont
+marqués `lent` car ils enchaînent des attentes réelles (subprocess,
+`time.sleep`). Pour une exécution rapide qui les exclut :
+`pytest -m "not lent"`.
+
 ## État actuel
 
 Application complète et déployée : voir ETAT.md pour l'état détaillé

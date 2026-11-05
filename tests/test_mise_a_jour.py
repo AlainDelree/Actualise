@@ -6,7 +6,6 @@ Aucun appel réseau réel : les réponses HTTP sont simulées via
 """
 
 import hashlib
-import shutil
 import tempfile
 import unittest
 import zipfile
