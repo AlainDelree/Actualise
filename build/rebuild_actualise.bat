@@ -191,7 +191,7 @@ if errorlevel 1 ( echo [ERREUR] Echec de pip install -r requirements.txt & popd 
 echo       Releve des dependances d'execution ^(pip freeze --all^)...
 set "VERSIONSFILE=versions-installees-v%BUILD%.txt"
 set "PYVER="
-for /f "usebackq delims=" %%V in (`".venv_build\Scripts\python.exe" -c "import platform; print(platform.python_version())"`) do set "PYVER=%%V"
+for /f "usebackq delims=" %%V in (`.venv_build\Scripts\python.exe -c "import platform; print(platform.python_version())"`) do set "PYVER=%%V"
 if not defined PYVER ( echo [ERREUR] Echec du releve de la version Python de .venv_build. & popd & exit /b 1 )
 > "%VERSIONSFILE%" echo # Python .venv_build : %PYVER%
 if errorlevel 1 ( echo [ERREUR] Echec de l'ecriture de %VERSIONSFILE%. & popd & exit /b 1 )
