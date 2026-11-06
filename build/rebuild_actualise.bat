@@ -11,7 +11,9 @@ REM  10 etapes (0 a 9) :
 REM    0. Localiser ISCC.exe (Inno Setup 6)
 REM    1. Determiner le numero de build (version.json + 1, ou --build N)
 REM    2. Copier le projet vers C:\Temp\ActualiseBuild
-REM    3. Environnement virtuel .venv_build + dependances
+REM    3. Environnement virtuel .venv_build + dependances (releve
+REM       versions-installees-v<N>.txt : pip freeze --all, avant et apres
+REM       l'installation de PyInstaller -- issue #89)
 REM    4. Signaler (sans les arreter) Actualise.exe / ActualiseUI.exe en cours
 REM    5. PyInstaller (actualise.spec puis actualise_ui.spec)
 REM    6. Verifier dist\Actualise\Actualise.exe + dist\ActualiseUI.exe + tailles
@@ -185,8 +187,25 @@ call ".venv_build\Scripts\python.exe" -m pip install --upgrade pip
 if errorlevel 1 ( echo [ERREUR] Echec de la mise a jour de pip & popd & exit /b 1 )
 call ".venv_build\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 ( echo [ERREUR] Echec de pip install -r requirements.txt & popd & exit /b 1 )
+
+echo       Releve des dependances d'execution ^(pip freeze --all^)...
+set "VERSIONSFILE=versions-installees-v%BUILD%.txt"
+set "PYVER="
+for /f "usebackq delims=" %%V in (`".venv_build\Scripts\python.exe" -c "import platform; print(platform.python_version())"`) do set "PYVER=%%V"
+if not defined PYVER ( echo [ERREUR] Echec du releve de la version Python de .venv_build. & popd & exit /b 1 )
+> "%VERSIONSFILE%" echo # Python .venv_build : %PYVER%
+if errorlevel 1 ( echo [ERREUR] Echec de l'ecriture de %VERSIONSFILE%. & popd & exit /b 1 )
+>> "%VERSIONSFILE%" echo # Dependances d'execution (pip freeze --all, apres "pip install -r requirements.txt", avant PyInstaller)
+call ".venv_build\Scripts\python.exe" -m pip freeze --all >> "%VERSIONSFILE%"
+if errorlevel 1 ( echo [ERREUR] Echec du releve des dependances d'execution ^(pip freeze --all^). & popd & exit /b 1 )
+
 call ".venv_build\Scripts\python.exe" -m pip install pyinstaller
 if errorlevel 1 ( echo [ERREUR] Echec de pip install pyinstaller & popd & exit /b 1 )
+
+echo       Releve de l'environnement de build complet ^(pip freeze --all^)...
+>> "%VERSIONSFILE%" echo # Environnement de build complet (pip freeze --all, apres pip install pyinstaller)
+call ".venv_build\Scripts\python.exe" -m pip freeze --all >> "%VERSIONSFILE%"
+if errorlevel 1 ( echo [ERREUR] Echec du releve de l'environnement de build complet ^(pip freeze --all^). & popd & exit /b 1 )
 
 REM ===========================================================================
 REM  ETAPE 4 : signaler (sans les arreter) Actualise.exe / ActualiseUI.exe
@@ -300,6 +319,10 @@ copy /y "installeur\output\%ZIPNAME%" "%ORIGDIR%\installeur\output\%ZIPNAME%" >n
 if errorlevel 1 ( echo [ERREUR] Echec de la copie de l'archive vers le worktree. & popd & exit /b 1 )
 echo       Copie vers %ORIGDIR%\installeur\output\%ZIPNAME%. OK.
 
+copy /y "%VERSIONSFILE%" "%ORIGDIR%\installeur\output\%VERSIONSFILE%" >nul
+if errorlevel 1 ( echo [ERREUR] Echec de la copie du releve de versions vers le worktree. & popd & exit /b 1 )
+echo       Copie vers %ORIGDIR%\installeur\output\%VERSIONSFILE%. OK.
+
 popd
 
 REM ===========================================================================
@@ -315,6 +338,8 @@ copy /y "%ORIGDIR%\installeur\output\%SETUPNAME%" "%FIXEDSHARE%\%SETUPNAME%" >nu
 if errorlevel 1 ( echo [ERREUR] Echec de la copie de l'installeur vers %FIXEDSHARE%. & exit /b 1 )
 copy /y "%ORIGDIR%\installeur\output\%ZIPNAME%" "%FIXEDSHARE%\%ZIPNAME%" >nul
 if errorlevel 1 ( echo [ERREUR] Echec de la copie de l'archive vers %FIXEDSHARE%. & exit /b 1 )
+copy /y "%ORIGDIR%\installeur\output\%VERSIONSFILE%" "%FIXEDSHARE%\%VERSIONSFILE%" >nul
+if errorlevel 1 ( echo [ERREUR] Echec de la copie du releve de versions vers %FIXEDSHARE%. & exit /b 1 )
 
 set "TAILLE_SETUP_PARTAGE=0"
 for /f "usebackq delims=" %%S in (`powershell -NoProfile -Command "(Get-Item '%FIXEDSHARE%\%SETUPNAME%').Length"`) do set "TAILLE_SETUP_PARTAGE=%%S"
@@ -350,6 +375,7 @@ echo ===========================================================================
 echo   TERMINE
 echo   Installeur : %ORIGDIR%\installeur\output\%SETUPNAME%
 echo   Archive    : %ORIGDIR%\installeur\output\%ZIPNAME%
+echo   Versions   : %ORIGDIR%\installeur\output\%VERSIONSFILE%
 echo ============================================================================
 echo.
 echo   --- Informations hors du worktree (mesurees par ce script, pas par l'agent) ---
