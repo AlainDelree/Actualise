@@ -79,7 +79,9 @@ def _ecrire_json_atomique(chemin_fichier: Path, contenu: dict[str, Any]) -> None
     dossier_config = chemin_fichier.parent
     dossier_config.mkdir(parents=True, exist_ok=True)
 
-    fichier_temp = tempfile.NamedTemporaryFile(
+    # delete=False volontaire : on récupère le chemin ; le fichier est
+    # refermé par le `with fichier_temp:` juste après.
+    fichier_temp = tempfile.NamedTemporaryFile(  # noqa: SIM115
         mode="w",
         encoding="utf-8",
         dir=dossier_config,

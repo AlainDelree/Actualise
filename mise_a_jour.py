@@ -35,7 +35,9 @@ def telecharger_zip(url: str, sha256_attendu: str) -> Path | None:
     réseau). Retourne le chemin du zip téléchargé et validé, ou
     ``None`` en cas d'échec (réseau ou SHA-256 invalide).
     """
-    fichier_temp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    # delete=False volontaire : on récupère le chemin ; le fichier est
+    # refermé par le `with fichier_temp:` juste après.
+    fichier_temp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)  # noqa: SIM115
     chemin_temp = Path(fichier_temp.name)
 
     try:

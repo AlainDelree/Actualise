@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """ActualiseUI — fenêtre de choix affichée par l'application cible
 (Scrabble, Rummikub, ...) quand une mise à jour d'Actualise est en
 attente de validation utilisateur (présence d'``actualise_update.flag``

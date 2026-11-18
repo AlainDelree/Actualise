@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Point d'entrée principal d'Actualise.
 
 Voir CONCEPTION.md, section « Séquence de démarrage — vérification non
