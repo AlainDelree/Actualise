@@ -8,7 +8,7 @@
     },
     {
       "regle": "SEC-022",
-      "raison": "2026-11-05 — L'empreinte est contrôlée au téléchargement, puis à chaque exécution d'Actualise pour les jeux et pour Actualise lui-même quand aucun fichier-drapeau n'existe, mais pas entre la génération du bat et son lancement (voir CONCEPTION.md). Limite acceptée : altérer le zip suppose déjà un accès en écriture au dossier d'Actualise, où se trouve aussi le bat ; ce droit est accordé à tous les utilisateurs locaux du PC par l'installeur de Scrabble, risque accepté sur un PC familial. À revoir en même temps que SEC-023."
+      "raison": "2026-11-05 — L'empreinte est contrôlée au téléchargement, puis à chaque exécution d'Actualise pour les jeux et pour Actualise lui-même quand aucun fichier-drapeau n'existe, mais pas entre la génération du bat et son lancement (voir CONTEXTE.md). Limite acceptée : altérer le zip suppose déjà un accès en écriture au dossier d'Actualise, où se trouve aussi le bat ; ce droit est accordé à tous les utilisateurs locaux du PC par l'installeur de Scrabble, risque accepté sur un PC familial. À revoir en même temps que SEC-023."
     }
   ]
 }

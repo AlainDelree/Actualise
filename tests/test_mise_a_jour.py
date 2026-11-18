@@ -1,7 +1,7 @@
 """Tests unitaires pour ``mise_a_jour.py``.
 
 Aucun appel réseau réel : les réponses HTTP sont simulées via
-``unittest.mock``. Voir CONCEPTION.md, « Distribution des binaires »,
+``unittest.mock``. Voir CONTEXTE.md, « Distribution des binaires »,
 « Manifeste de mise à jour » et « Vérification SHA-256 du zip ».
 """
 

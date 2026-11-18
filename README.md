@@ -20,7 +20,7 @@ disponibles (pour lui-même et pour l'application cible) ; toute mise à
 jour trouvée est appliquée au lancement suivant, jamais pendant la
 session en cours.
 
-Voir [CONCEPTION.md](CONCEPTION.md) pour le rapport de conception
+Voir [CONTEXTE.md](CONTEXTE.md) pour le rapport de conception
 complet (architecture détaillée, format de version, distribution des
 binaires, manifeste de mise à jour, séquence de démarrage, garde-fou
 anti-boucle infinie, et l'ensemble des décisions actées) et

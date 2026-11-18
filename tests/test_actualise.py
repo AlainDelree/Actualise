@@ -3,7 +3,7 @@
 Aucune exécution réelle de sous-processus ni appel réseau : ``Popen``
 et les fonctions des autres modules (``config``, ``mise_a_jour``,
 ``version_check``, ``notifications``) sont simulés via
-``unittest.mock``. Voir CONCEPTION.md, « Séquence de démarrage —
+``unittest.mock``. Voir CONTEXTE.md, « Séquence de démarrage —
 vérification non bloquante » et « Garde-fou anti-boucle infinie ».
 
 Exception à cette règle : ``TestGabaritUpdaterBat`` (issue #68) exécute
@@ -1019,7 +1019,7 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
 
 
 class TestMain(unittest.TestCase):
-    """Voir CONCEPTION.md : ``main()`` doit loguer toute exception fatale
+    """Voir CONTEXTE.md : ``main()`` doit loguer toute exception fatale
     non anticipée par les except existants avant de la laisser se
     propager (sinon ``actualise.log`` reste vide en ``--noconsole``),
     sans jamais intercepter le ``SystemExit(0)`` volontaire du garde-fou

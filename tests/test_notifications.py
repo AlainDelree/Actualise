@@ -1,7 +1,7 @@
 """Tests unitaires pour ``notifications.py``.
 
 Aucun appel réseau réel : les réponses HTTP sont simulées via
-``unittest.mock``. Voir CONCEPTION.md, « Décisions actées » (repli
+``unittest.mock``. Voir CONTEXTE.md, « Décisions actées » (repli
 silencieux sur échec réseau).
 """
 

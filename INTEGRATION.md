@@ -2,7 +2,7 @@
 
 ## 1. Objectif
 
-Guide pratique destiné à une conversation Claude qui intègre une nouvelle application cible avec Actualise. Complète CONCEPTION.md qui reste la référence architecturale.
+Guide pratique destiné à une conversation Claude qui intègre une nouvelle application cible avec Actualise. Complète CONTEXTE.md qui reste la référence architecturale.
 
 ## 2. Architecture générale
 
@@ -76,11 +76,11 @@ _actualise = Path(r"C:\Actualise\Actualise.exe")
 if _actualise.exists():
     subprocess.Popen([str(_actualise), "--config", "<nom>"])  # ex. "scrabble"
 ```
-C'est cet appel, et lui seul, qui déclenche la vérification/téléchargement en arrière-plan d'une nouvelle version (d'Actualise lui-même et/ou de l'app cible) — voir CONCEPTION.md, « Séquence de démarrage ». Aucun raccourci ne pointe jamais vers `Actualise.exe` (voir §3) : c'est uniquement l'app cible, dans son propre code, qui le lance.
+C'est cet appel, et lui seul, qui déclenche la vérification/téléchargement en arrière-plan d'une nouvelle version (d'Actualise lui-même et/ou de l'app cible) — voir CONTEXTE.md, « Séquence de démarrage ». Aucun raccourci ne pointe jamais vers `Actualise.exe` (voir §3) : c'est uniquement l'app cible, dans son propre code, qui le lance.
 
 ### Au démarrage, étape 2 : détecter un flag déjà en attente
 
-Peut concerner **deux usages différents** du même flag — une mise à jour d'Actualise lui-même **ou** une mise à jour de l'app cible restée en attente d'un cycle précédent (ex. le PC a été éteint avant la fermeture normale de l'app, qui n'a donc jamais eu l'occasion de lancer le bat correspondant, voir CONCEPTION.md, « ActualiseUI.exe », cas limite dédié). Le code ci-dessous ne distingue pas les deux cas : le JSON du flag porte un champ `type` facultatif (`"actualise"` ou `"jeu"`), purement informationnel, que ce code **ignore** volontairement — seule l'existence du fichier compte :
+Peut concerner **deux usages différents** du même flag — une mise à jour d'Actualise lui-même **ou** une mise à jour de l'app cible restée en attente d'un cycle précédent (ex. le PC a été éteint avant la fermeture normale de l'app, qui n'a donc jamais eu l'occasion de lancer le bat correspondant, voir CONTEXTE.md, « ActualiseUI.exe », cas limite dédié). Le code ci-dessous ne distingue pas les deux cas : le JSON du flag porte un champ `type` facultatif (`"actualise"` ou `"jeu"`), purement informationnel, que ce code **ignore** volontairement — seule l'existence du fichier compte :
 ```python
 import json
 import subprocess
