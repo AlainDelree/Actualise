@@ -1,8 +1,8 @@
 """Envoi de notifications ntfy.
 
-Voir CONTEXTE.md, section « Contenu de config.json » (champ
-``topic_ntfy``) et « Décisions actées » (« un topic ntfy dédié par
-programme géré »).
+Voir docs/contexte/configuration.md, section « Contenu des fichiers de
+configuration — `config_actualise.json` / `config_<nom_app>.json` »
+(champ ``topic_ntfy``, règle « un topic ntfy dédié par programme géré »).
 """
 
 import logging
@@ -21,11 +21,12 @@ def notifier_ntfy(topic: str, message: str) -> None:
 
     Utilisé notamment pour la notification informative envoyée quand une
     mise à jour a été téléchargée et validée en arrière-plan (voir
-    CONTEXTE.md, « Séquence de démarrage » étape 3).
+    docs/contexte/demarrage_reseau.md, « Séquence de démarrage » étape 3).
 
     Repli silencieux en cas d'échec (timeout, connexion refusée, erreur
     HTTP) : une notification ratée ne doit jamais interrompre le flux
-    normal d'Actualise (voir CONTEXTE.md, « Décisions actées »).
+    normal d'Actualise (voir docs/contexte/demarrage_reseau.md,
+    « Vérification réseau — timeout strict »).
     """
     url = _GABARIT_URL_NTFY.format(topic=topic)
 

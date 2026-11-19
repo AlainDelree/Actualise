@@ -1,7 +1,8 @@
 """Lecture/écriture de config_actualise.json / config_<app>.json et
 résolution du chemin de configuration portable (Windows/Linux).
 
-Voir CONTEXTE.md, sections « Contenu de config.json » et
+Voir docs/contexte/configuration.md, sections « Contenu des fichiers de
+configuration — `config_actualise.json` / `config_<nom_app>.json` » et
 « Configuration portable ».
 """
 
@@ -24,8 +25,8 @@ def chemin_config_portable() -> Path:
     ``sys.executable`` — et non un chemin Windows fixe. Ceci permet
     plusieurs installations indépendantes d'Actualise sur la même
     machine (une par application cible) sans qu'une installation
-    n'écrase le ``config.json`` d'une autre (voir CONTEXTE.md,
-    « Configuration portable »).
+    n'écrase le ``config.json`` d'une autre (voir
+    docs/contexte/configuration.md, « Configuration portable »).
 
     Windows, mode script non figé (développement/tests, ``sys.frozen``
     absent ou faux) : repli sur l'ancien comportement,
@@ -38,7 +39,7 @@ def chemin_config_portable() -> Path:
     d'environnement ``ACTUALISE_CONFIG_DIR`` si définie, sinon
     ``~/.config/actualise/`` ; la problématique de collision
     multi-installations ne s'y pose pas de la même façon (voir
-    CONTEXTE.md, « Configuration portable »).
+    docs/contexte/configuration.md, « Configuration portable »).
 
     Ne crée pas le dossier — résolution de chemin uniquement (voir
     ``sauvegarder_config_actualise``/``sauvegarder_config_app`` pour la
@@ -102,8 +103,9 @@ def _ecrire_json_atomique(chemin_fichier: Path, contenu: dict[str, Any]) -> None
 def charger_config(nom_app: str) -> dict[str, Any]:
     """Charge et fusionne config_actualise.json et config_<nom_app>.json.
 
-    Voir CONTEXTE.md, section « Contenu de config.json », pour le
-    format attendu. Retourne un dict compatible avec la structure
+    Voir docs/contexte/configuration.md, section « Contenu des fichiers
+    de configuration — `config_actualise.json` / `config_<nom_app>.json` »,
+    pour le format attendu. Retourne un dict compatible avec la structure
     utilisée par ``actualise.py`` :
 
     - ``actualise`` : contenu de config_actualise.json sans zone_attente
@@ -139,7 +141,8 @@ def sauvegarder_config_actualise(bloc_actualise: dict[str, Any], zone_attente: s
     """Sauvegarde config_actualise.json (build_installe Actualise,
     depot_github, zone_attente).
 
-    Voir CONTEXTE.md, section « Contenu de config.json ».
+    Voir docs/contexte/configuration.md, section « Contenu des fichiers
+    de configuration — `config_actualise.json` / `config_<nom_app>.json` ».
     """
     contenu = {**bloc_actualise, "zone_attente": zone_attente}
     chemin_fichier = chemin_config_portable() / _NOM_FICHIER_ACTUALISE
@@ -150,7 +153,8 @@ def sauvegarder_config_app(nom_app: str, bloc_app: dict[str, Any]) -> None:
     """Sauvegarde config_<nom_app>.json (tous les champs
     application_cible).
 
-    Voir CONTEXTE.md, section « Contenu de config.json ».
+    Voir docs/contexte/configuration.md, section « Contenu des fichiers
+    de configuration — `config_actualise.json` / `config_<nom_app>.json` ».
     """
     chemin_fichier = chemin_config_portable() / _nom_fichier_app(nom_app)
     _ecrire_json_atomique(chemin_fichier, bloc_app)

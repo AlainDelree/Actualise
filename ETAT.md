@@ -56,13 +56,6 @@
   qui lance Actualise à son démarrage — tourne encore) non tranchée ;
   issue #66 traite la façon d'échouer (non fatal, zip conservé) mais pas
   la cause elle-même — à trancher par un test en conditions réelles.
-- Fiabilisation de updater.bat à prévoir (issue pas encore créée) :
-  constaté qu'ActualiseUI.exe n'est pas remplacé par la bascule (garde
-  la date du build précédent) ; constaté aussi, lors d'un test réel
-  v10→v11, qu'une première passe faite avec le code de la v10 peut
-  laisser build_installe périmé, corrigé seulement par la passe
-  suivante — les PC encore en v10 verront une proposition de mise à
-  jour de trop, une seule fois.
 - CHANGELOG-67.md reste un fichier séparé à la racine : l'outil de
   relecture ne sait pas l'intégrer à CHANGELOG.md pour un projet du PC
   fixe — intégration à faire.

@@ -1,8 +1,10 @@
 """Tests unitaires pour ``mise_a_jour.py``.
 
 Aucun appel réseau réel : les réponses HTTP sont simulées via
-``unittest.mock``. Voir CONTEXTE.md, « Distribution des binaires »,
-« Manifeste de mise à jour » et « Vérification SHA-256 du zip ».
+``unittest.mock``. Voir docs/contexte/distribution_releases.md,
+« Distribution des binaires — GitHub Releases » et « Manifeste de mise
+à jour », et docs/contexte/bascule_mise_a_jour.md, « Vérification
+SHA-256 à l'application (sidecar, SEC-022) ».
 """
 
 import hashlib

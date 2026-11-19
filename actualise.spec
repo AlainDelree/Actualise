@@ -6,16 +6,17 @@ l'environnement virtuel du projet activé — ``requests`` et ``pyinstaller``
 installés). Sortie en mode ``--onedir`` dans ``dist/Actualise/``.
 
 Actualise doit rester invisible pendant que l'application cible tourne
-(voir CONTEXTE.md) : build en ``console=False`` (``--noconsole``), comme
-Scrabble/Rummikub. Le mécanisme de logging vers fichier
-(``actualise.configurer_logging``) existe précisément pour compenser
-l'absence de console — c'est la seule trace disponible en cas de problème.
+(voir CONTEXTE.md, architecture) : build en ``console=False``
+(``--noconsole``), comme Scrabble/Rummikub. Le mécanisme de logging vers
+fichier (``actualise.configurer_logging``) existe précisément pour
+compenser l'absence de console — c'est la seule trace disponible en cas
+de problème.
 
 Note de cohérence (issue #328, corrigée en issue #329) : un premier commit
 local avait empaqueté en ``console=True`` en argumentant qu'Actualise est un
 updater CLI (``argparse``, flag ``--child``) sans besoin d'interface
-graphique. Cette valeur était incohérente avec CONTEXTE.md et a été
-corrigée ici avant tout push vers origin.
+graphique. Cette valeur était incohérente avec l'architecture décrite dans
+CONTEXTE.md et a été corrigée ici avant tout push vers origin.
 
 Données embarquées (``datas``)
 -------------------------------
@@ -68,7 +69,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # Invisible pendant que l'app cible tourne ; logging fichier compense (CONTEXTE.md).
+    console=False,  # Invisible pendant que l'app cible tourne ; logging fichier compense (CONTEXTE.md, architecture).
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

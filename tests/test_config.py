@@ -3,8 +3,9 @@
 Aucune modification de l'environnement réel de l'utilisateur : les
 dossiers de configuration utilisés dans les tests sont systématiquement
 des dossiers temporaires (``tempfile``), et ``sys.platform``/``os.environ``
-sont simulés via ``unittest.mock``. Voir CONTEXTE.md, « Configuration
-portable » et « Contenu de config.json ».
+sont simulés via ``unittest.mock``. Voir docs/contexte/configuration.md,
+« Configuration portable » et « Contenu des fichiers de configuration —
+`config_actualise.json` / `config_<nom_app>.json` ».
 """
 
 import json
@@ -40,7 +41,7 @@ class TestCheminConfigPortable(unittest.TestCase):
     def test_windows_fige_pyinstaller_relatif_executable(self):
         # Mode PyInstaller figé : dossier contenant Actualise.exe,
         # résolu via sys.executable — pas un chemin fixe (voir
-        # CONTEXTE.md, « Configuration portable »).
+        # docs/contexte/configuration.md, « Configuration portable »).
         self.assertEqual(
             chemin_config_portable(),
             Path("D:/Apps/Actualise_Scrabble"),

@@ -1,8 +1,9 @@
 """Tests unitaires pour ``notifications.py``.
 
 Aucun appel réseau réel : les réponses HTTP sont simulées via
-``unittest.mock``. Voir CONTEXTE.md, « Décisions actées » (repli
-silencieux sur échec réseau).
+``unittest.mock``. Voir docs/contexte/demarrage_reseau.md,
+« Vérification réseau — timeout strict » (repli silencieux sur échec
+réseau).
 """
 
 import unittest

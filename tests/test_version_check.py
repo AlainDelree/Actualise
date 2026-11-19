@@ -1,8 +1,9 @@
 """Tests unitaires pour ``verifier_version`` (version_check.py).
 
 Aucun appel réseau réel : les réponses HTTP sont simulées via
-``unittest.mock``. Voir CONTEXTE.md, « Format de version » et
-« Vérification réseau — timeout strict ».
+``unittest.mock``. Voir docs/contexte/versioning.md, « Format de
+version » et docs/contexte/demarrage_reseau.md, « Vérification réseau
+— timeout strict ».
 """
 
 import unittest

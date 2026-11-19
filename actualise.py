@@ -1,8 +1,9 @@
 """Point d'entrée principal d'Actualise.
 
-Voir CONTEXTE.md, section « Séquence de démarrage — vérification non
-bloquante » pour le déroulé complet, et « Garde-fou anti-boucle
-infinie » pour le rôle de l'argument ``--child``.
+Voir docs/contexte/demarrage_reseau.md, section « Séquence de
+démarrage — vérification non bloquante » pour le déroulé complet, et
+docs/contexte/bascule_mise_a_jour.md, « Garde-fou anti-boucle infinie »
+pour le rôle de l'argument ``--child``.
 """
 
 import argparse
@@ -25,12 +26,14 @@ import version_check
 
 _LOGGER = logging.getLogger(__name__)
 
-# Gabarit de l'URL d'un asset de Release GitHub (voir CONTEXTE.md,
-# « Distribution des binaires — GitHub Releases »). Le numéro de build
-# sert directement de tag (ex. ``v48``) : simple, lisible, et cohérent
-# avec l'entier incrémental déjà acté comme identifiant de version
-# (voir « Format de version ») — à documenter/adapter si un autre
-# format de tag devait un jour être retenu.
+# Gabarit de l'URL d'un asset de Release GitHub (voir
+# docs/contexte/distribution_releases.md, « Distribution des binaires —
+# GitHub Releases »). Le numéro de build sert directement de tag (ex.
+# ``v48``) : simple, lisible, et cohérent avec l'entier incrémental
+# déjà acté comme identifiant de version (voir
+# docs/contexte/versioning.md, « Format de version ») — à
+# documenter/adapter si un autre format de tag devait un jour être
+# retenu.
 _GABARIT_URL_RELEASE = "https://github.com/{depot}/releases/download/v{build}/{fichier}"
 
 
@@ -38,15 +41,15 @@ def analyser_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     """Définit et analyse les arguments de la ligne de commande.
 
     ``--child`` est le marqueur explicite parent → enfant du garde-fou
-    anti-boucle infinie (voir CONTEXTE.md, « Garde-fou anti-boucle
-    infinie ») : si présent, l'instance saute inconditionnellement toute
-    bascule d'auto-mise-à-jour supplémentaire.
+    anti-boucle infinie (voir docs/contexte/bascule_mise_a_jour.md,
+    « Garde-fou anti-boucle infinie ») : si présent, l'instance saute
+    inconditionnellement toute bascule d'auto-mise-à-jour supplémentaire.
     """
     analyseur = argparse.ArgumentParser(description="Actualise — mise à jour automatique")
     analyseur.add_argument(
         "--child",
         action="store_true",
-        help="Marqueur interne : instance relancée après bascule d'auto-mise-à-jour (voir CONTEXTE.md)",
+        help="Marqueur interne : instance relancée après bascule d'auto-mise-à-jour (voir docs/contexte/bascule_mise_a_jour.md)",
     )
     analyseur.add_argument(
         "--config",
@@ -61,9 +64,9 @@ def _prefixe_pour(nom: str) -> str:
     """Dérive le préfixe de nommage en zone d'attente à partir du nom
     d'un programme (ex. ``"Scrabble"`` → ``"scrabble"``).
 
-    Voir CONTEXTE.md, « Nommage versionné des zips en zone d'attente »
-    (ex. ``scrabble_112.zip`` pour un ``config["application_cible"]["nom"]``
-    valant ``"Scrabble"``).
+    Voir docs/contexte/versioning.md, « Nommage versionné des zips en
+    zone d'attente » (ex. ``scrabble_112.zip`` pour un
+    ``config["application_cible"]["nom"]`` valant ``"Scrabble"``).
     """
     return nom.lower()
 
@@ -90,12 +93,13 @@ def _chercher_zip_en_attente(zone_attente: Path, prefixe: str) -> tuple[Path, in
     Retourne son chemin et le ``build`` extrait du nom de fichier, ou
     ``None`` si aucun fichier de ce préfixe n'est présent (y compris si
     ``zone_attente`` lui-même n'existe pas encore, cas du tout premier
-    lancement). Voir CONTEXTE.md, « Nommage versionné des zips en zone
-    d'attente ».
+    lancement). Voir docs/contexte/versioning.md, « Nommage versionné
+    des zips en zone d'attente ».
 
     **Cas limite : plusieurs zips du même préfixe.** Seul celui au build
     le plus élevé est retourné ; tous les autres sont des résidus
-    dépassés (voir CONTEXTE.md, cas limite dédié) et sont supprimés
+    dépassés (voir docs/contexte/versioning.md, « Cas limite : plusieurs
+    zips du même préfixe présents simultanément ») et sont supprimés
     immédiatement ici même, sans être appliqués — ce choix
     d'implémentation garde l'appelant simple (il ne reçoit jamais qu'un
     seul candidat à traiter).
@@ -125,10 +129,11 @@ def _chercher_zip_en_attente(zone_attente: Path, prefixe: str) -> tuple[Path, in
 def _relancer_en_enfant(nom_app: str) -> None:
     """Relance une 2ème instance d'Actualise avec le marqueur ``--child``.
 
-    Voir CONTEXTE.md, « Garde-fou anti-boucle infinie ». Gère aussi
-    bien le cas d'un exécutable PyInstaller gelé (``sys.frozen``) que
-    l'exécution directe du script Python. ``nom_app`` ne sert plus à
-    lancer une application cible (Actualise ne lance plus aucun jeu) :
+    Voir docs/contexte/bascule_mise_a_jour.md, « Garde-fou anti-boucle
+    infinie ». Gère aussi bien le cas d'un exécutable PyInstaller gelé
+    (``sys.frozen``) que l'exécution directe du script Python.
+    ``nom_app`` ne sert plus à lancer une application cible (Actualise
+    ne lance plus aucun jeu) :
     il est uniquement reconstruit en ``--config nom_app`` pour que
     l'enfant sache pour quelle application cible poursuivre la
     vérification/mise à jour en arrière-plan.
@@ -170,7 +175,8 @@ def _basculer_par_renommage(dossier_source: Path, destination: Path) -> None:
     Un ``.exe`` en cours d'exécution ne peut pas être réécrit en place
     sous Windows (``PermissionError``/``WinError 5``, ``os.replace``
     devant implicitement supprimer la destination avant d'y déplacer la
-    source) — voir CONTEXTE.md, « Garde-fou anti-boucle infinie ».
+    source) — voir docs/contexte/bascule_mise_a_jour.md, « Garde-fou
+    anti-boucle infinie ».
     Cas particulier de ``_NOM_EXECUTABLE`` (``Actualise.exe``) : Windows
     autorise en revanche de le *renommer* pendant qu'il tourne, d'où une
     bascule en deux temps propre à ce fichier — renommage de l'exécutable
@@ -249,7 +255,8 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
 
     Si ``est_enfant`` est vrai (marqueur ``--child`` présent), cette
     étape est sautée inconditionnellement pour Actualise lui-même — voir
-    CONTEXTE.md, « Garde-fou anti-boucle infinie ».
+    docs/contexte/bascule_mise_a_jour.md, « Garde-fou anti-boucle
+    infinie ».
     """
     if est_enfant:
         return
@@ -292,8 +299,8 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
             if build_zip <= bloc_config["build_installe"]:
                 # Résidu obsolète (déjà appliqué à un cycle précédent, ou
                 # périmé) : nettoyage automatique sans bascule, voir
-                # CONTEXTE.md « Nommage versionné des zips en zone
-                # d'attente ».
+                # docs/contexte/versioning.md « Nommage versionné des
+                # zips en zone d'attente ».
                 chemin_zip.unlink()
                 _chemin_empreinte_zip(chemin_zip).unlink(missing_ok=True)
                 continue
@@ -344,8 +351,8 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
             except zipfile.BadZipFile:
                 # Zip corrompu ou pas un zip valide : bloquant, même
                 # traitement qu'un manifeste absent ci-dessous — voir
-                # CONTEXTE.md, « Manifeste de mise à jour », cas
-                # limite dédié.
+                # docs/contexte/distribution_releases.md, « Manifeste de
+                # mise à jour », cas limite dédié.
                 _LOGGER.warning(
                     "Zip de mise à jour invalide en zone d'attente (%s) : "
                     "bascule ignorée, zip conservé pour nouvelle tentative.",
@@ -355,8 +362,8 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
             except KeyError:
                 # manifest.json absent de l'archive : traité comme
                 # bloquant, zip conservé pour nouvelle tentative
-                # ultérieure — voir CONTEXTE.md, « Manifeste de mise
-                # à jour », cas limite dédié.
+                # ultérieure — voir docs/contexte/distribution_releases.md,
+                # « Manifeste de mise à jour », cas limite dédié.
                 _LOGGER.warning(
                     "manifest.json absent du zip de mise à jour (%s) : "
                     "bascule ignorée, zip conservé pour nouvelle tentative.",
@@ -369,9 +376,9 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                 # qu'il tourne (PermissionError sous Windows sur son
                 # propre .exe) : extraction dans un dossier temporaire
                 # distinct, puis bascule par renommage fichier à
-                # fichier — voir CONTEXTE.md, « Garde-fou
-                # anti-boucle infinie ». Le manifeste est appliqué
-                # après la bascule, directement sur
+                # fichier — voir docs/contexte/bascule_mise_a_jour.md,
+                # « Garde-fou anti-boucle infinie ». Le manifeste est
+                # appliqué après la bascule, directement sur
                 # repertoire_installation : il vise des fichiers
                 # obsolètes de l'installation déjà en place (pas
                 # nécessairement présents dans le zip fraîchement
@@ -421,14 +428,15 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
                 # instance (marqueur --child), puis on termine ce process
                 # parent immédiatement, sans démarrer la tâche de fond —
                 # l'enfant reprend la suite de la séquence de démarrage à
-                # sa place. Voir CONTEXTE.md, « Garde-fou anti-boucle
-                # infinie ».
+                # sa place. Voir docs/contexte/bascule_mise_a_jour.md,
+                # « Garde-fou anti-boucle infinie ».
                 _relancer_en_enfant(nom_app)
                 raise SystemExit(0)
             else:
                 # Un zip de jeu ne s'applique plus que via le bat généré
                 # ci-dessous, déclenché par le jeu lui-même à sa
-                # fermeture (voir CONTEXTE.md, issue #73) : jamais
+                # fermeture (voir docs/contexte/maj_application_cible.md,
+                # issue #73) : jamais
                 # d'extraction directe ici (l'exécutable du jeu peut
                 # être en cours d'exécution — c'est précisément le cas
                 # normal, puisque c'est lui qui a lancé Actualise), et
@@ -709,8 +717,9 @@ def _ecrire_flag_maj(
 
     Détecté par l'application cible à son démarrage pour lancer
     ActualiseUI.exe, qui présente à l'utilisateur le choix d'appliquer
-    la mise à jour (voir CONTEXTE.md). ``type_maj`` (``"actualise"``
-    ou ``"jeu"``) est un champ facultatif, purement informationnel : le
+    la mise à jour (voir docs/contexte/actualiseui_dialogue.md).
+    ``type_maj`` (``"actualise"`` ou ``"jeu"``) est un champ facultatif,
+    purement informationnel : le
     code déjà déployé dans les jeux ne teste que l'existence du fichier
     (son nom littéral), il ne lit ni n'exige ce champ — il ne sert qu'au
     diagnostic humain (lecture du flag, journal).
@@ -951,9 +960,10 @@ def _generer_updater_bat_jeu(
 
     Généralisation, pour une application cible quelconque, du mécanisme
     ``_generer_updater_bat`` déjà en place pour Actualise lui-même (voir
-    CONTEXTE.md) : mêmes garanties (attente réelle des processus,
-    contrôle de chaque étape avec restauration de l'état initial, journal
-    ``updater.log``, ``build_installe`` réécrit seulement après succès),
+    docs/contexte/actualiseui_dialogue.md) : mêmes garanties (attente
+    réelle des processus, contrôle de chaque étape avec restauration de
+    l'état initial, journal ``updater.log``, ``build_installe`` réécrit
+    seulement après succès),
     mais généralisées à un contenu de zip arbitraire — chaque entrée de
     premier niveau de l'archive (``entrees_racine``, déterminées par
     l'appelant via ``_lister_entrees_racine_zip`` au moment de la
@@ -970,9 +980,10 @@ def _generer_updater_bat_jeu(
     ``appliquer_mises_a_jour_en_attente`` par cette même issue #73), ce
     bat ne supprime aucun fichier au-delà de ceux remplacés par une
     entrée de même nom présente dans le zip — limitation connue et
-    documentée (voir CONTEXTE.md et le rapport de l'issue #73),
-    ``manifest["supprimer"]`` n'étant pas mentionné par la tâche
-    demandée et son implémentation en batch générique ajoutant un risque
+    documentée (voir docs/contexte/maj_application_cible.md et le
+    rapport de l'issue #73), ``manifest["supprimer"]`` n'étant pas
+    mentionné par la tâche demandée et son implémentation en batch
+    générique ajoutant un risque
     non négligeable pour un gain non démontré.
     """
     blocs_bascule = "".join(
@@ -1112,7 +1123,7 @@ def _assurer_maj_jeu_en_attente(
     """Génère, si besoin, le bat + le flag de mise à jour pour
     l'application cible (le « jeu »), généralisation du mécanisme
     flag + updater.bat déjà en place pour Actualise lui-même (voir
-    CONTEXTE.md, section dédiée à la mise à jour d'un jeu).
+    docs/contexte/maj_application_cible.md).
 
     **Validation du nom (règle de sécurité, issue #84)** : ``nom_app``
     sert à construire le nom du bat (``updater_<nom_app>.bat``, voir
@@ -1252,8 +1263,9 @@ def _assurer_maj_jeu_en_attente(
 def _url_asset_release(depot_github: str, build: int, prefixe: str) -> str:
     """Construit l'URL de l'asset zip de Release GitHub pour ``build``.
 
-    Voir CONTEXTE.md, « Distribution des binaires — GitHub Releases » :
-    un seul asset zip par tag, le tag étant ``v<build>`` (ex. ``v48``).
+    Voir docs/contexte/distribution_releases.md, « Distribution des
+    binaires — GitHub Releases » : un seul asset zip par tag, le tag
+    étant ``v<build>`` (ex. ``v48``).
     Convention retenue ici pour le nom de fichier de l'asset publié :
     ``<prefixe>-v<build>.zip`` (ex. ``actualise-v48.zip``,
     ``scrabble-v4.zip``) — à documenter/adapter si un autre nommage
@@ -1267,10 +1279,10 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
     (Actualise et application cible), notifie via ntfy si une mise à
     jour est prête.
 
-    Voir CONTEXTE.md, « Séquence de démarrage », étape 3. Toute
-    exception inattendue est capturée et loguée : cette tâche tourne
-    dans un thread séparé, sans supervision, et ne doit jamais faire
-    planter le programme.
+    Voir docs/contexte/demarrage_reseau.md, « Séquence de démarrage »,
+    étape 3. Toute exception inattendue est capturée et loguée : cette
+    tâche tourne dans un thread séparé, sans supervision, et ne doit
+    jamais faire planter le programme.
     """
     try:
         _LOGGER.info("Démarrage de la vérification des mises à jour en arrière-plan.")
@@ -1315,7 +1327,8 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
                 # qu'il tourne : le bat + le flag sont générés dès
                 # maintenant, pour que l'application cible les détecte
                 # à son prochain démarrage et laisse l'utilisateur
-                # choisir via ActualiseUI.exe (voir CONTEXTE.md).
+                # choisir via ActualiseUI.exe (voir
+                # docs/contexte/actualiseui_dialogue.md).
                 try:
                     chemin_flag = (
                         Path(configuration["application_cible"]["repertoire_installation"])
@@ -1339,8 +1352,9 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
                 # dès maintenant (comme pour Actualise ci-dessus), pour
                 # qu'ils soient prêts avant une éventuelle fermeture du
                 # jeu au cours de cette même session — voir
-                # CONTEXTE.md, issue #73. Ne fait rien si un flag est
-                # déjà en attente dans ce dossier (ex. mise à jour
+                # docs/contexte/maj_application_cible.md, issue #73. Ne
+                # fait rien si un flag est déjà en attente dans ce
+                # dossier (ex. mise à jour
                 # d'Actualise traitée juste au-dessus dans cette même
                 # itération : elle passe toujours en premier).
                 _assurer_maj_jeu_en_attente(
@@ -1387,8 +1401,9 @@ def configurer_logging() -> None:
 def main(argv: list[str] | None = None) -> int:
     """Orchestre la séquence de démarrage non bloquante d'Actualise.
 
-    Voir CONTEXTE.md, « Séquence de démarrage — vérification non
-    bloquante » pour le déroulé complet des étapes ci-dessous.
+    Voir docs/contexte/demarrage_reseau.md, « Séquence de démarrage —
+    vérification non bloquante » pour le déroulé complet des étapes
+    ci-dessous.
     """
     configurer_logging()
     _nettoyer_ancien_executable()
@@ -1423,7 +1438,8 @@ def main(argv: list[str] | None = None) -> int:
 
         # Cycle de vie d'Actualise : on attend la fin de la tâche de fond
         # (pas celle de l'application cible) avant de terminer — voir
-        # CONTEXTE.md, « Cycle de vie du processus Actualise ».
+        # docs/contexte/demarrage_reseau.md, « Cycle de vie du processus
+        # Actualise ».
         thread_verification.join()
     except Exception:
         _LOGGER.exception("Actualise s'est arrêté sur une erreur fatale non gérée.")

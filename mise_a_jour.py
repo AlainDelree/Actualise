@@ -1,8 +1,9 @@
 """Téléchargement, vérification SHA-256, extraction du zip de mise à
 jour et application du manifeste.
 
-Voir CONTEXTE.md, sections « Distribution des binaires — GitHub
-Releases », « Manifeste de mise à jour » et « Séquence de démarrage —
+Voir docs/contexte/distribution_releases.md, sections « Distribution
+des binaires — GitHub Releases » et « Manifeste de mise à jour », et
+docs/contexte/demarrage_reseau.md, « Séquence de démarrage —
 vérification non bloquante » (étapes 3 et 4).
 """
 
@@ -29,10 +30,10 @@ def telecharger_zip(url: str, sha256_attendu: str) -> Path | None:
     """Télécharge le zip de mise à jour depuis ``url`` et vérifie son
     intégrité via ``sha256_attendu``.
 
-    Voir CONTEXTE.md, « Séquence de démarrage » étape 3 : en cas de
-    non-correspondance du SHA-256, le téléchargement est rejeté et
-    aucune zone d'attente n'est mise à jour (même repli qu'un échec
-    réseau). Retourne le chemin du zip téléchargé et validé, ou
+    Voir docs/contexte/demarrage_reseau.md, « Séquence de démarrage »
+    étape 3 : en cas de non-correspondance du SHA-256, le téléchargement
+    est rejeté et aucune zone d'attente n'est mise à jour (même repli
+    qu'un échec réseau). Retourne le chemin du zip téléchargé et validé, ou
     ``None`` en cas d'échec (réseau ou SHA-256 invalide).
     """
     # delete=False volontaire : on récupère le chemin ; le fichier est
@@ -64,9 +65,9 @@ def verifier_sha256(chemin_fichier: Path, hash_attendu: str) -> bool:
     """Calcule le SHA-256 de ``chemin_fichier`` et le compare à
     ``hash_attendu``.
 
-    Voir CONTEXTE.md, « Format de version » (champ ``sha256`` du
-    version.json) et « Vérification SHA-256 du zip » dans le tableau
-    « Décisions actées ».
+    Voir docs/contexte/versioning.md, « Format de version » (champ
+    ``sha256`` du version.json) et docs/contexte/bascule_mise_a_jour.md,
+    « Vérification SHA-256 à l'application (sidecar, SEC-022) ».
     """
     hachage = hashlib.sha256()
     try:
@@ -113,8 +114,8 @@ def extraire_zip(chemin_zip: Path, destination: Path) -> None:
     """Extrait ``chemin_zip`` dans ``destination``, en écrasant les
     fichiers existants de même nom et en ajoutant les nouveaux.
 
-    Voir CONTEXTE.md, « Séquence de démarrage » étape 4, sous-étape 1
-    (« extraction du zip »).
+    Voir docs/contexte/demarrage_reseau.md, « Séquence de démarrage »
+    étape 4, sous-étape 1 (« extraction du zip »).
     """
     destination.mkdir(parents=True, exist_ok=True)
     destination_resolue = destination.resolve()
@@ -133,8 +134,9 @@ def appliquer_manifeste(manifest: dict[str, Any], destination: Path) -> None:
     supprime les fichiers listés dans ``manifest["supprimer"]``.
 
     Liste noire optionnelle et fail-safe : seuls les chemins listés sont
-    supprimés. Voir CONTEXTE.md, « Manifeste de mise à jour » et
-    « Séquence de démarrage » étape 4, sous-étape 2.
+    supprimés. Voir docs/contexte/distribution_releases.md, « Manifeste
+    de mise à jour » et docs/contexte/demarrage_reseau.md, « Séquence de
+    démarrage » étape 4, sous-étape 2.
     """
     destination_resolue = destination.resolve()
 

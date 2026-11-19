@@ -1,7 +1,9 @@
 """Vérification de version.json (Actualise et application cible).
 
-Voir CONTEXTE.md, sections « Format de version », « Deux fichiers
-version.json distincts » et « Vérification réseau — timeout strict ».
+Voir docs/contexte/versioning.md, sections « Format de version » et
+« Deux fichiers `version.json` distincts », et
+docs/contexte/demarrage_reseau.md, « Vérification réseau — timeout
+strict ».
 """
 
 import logging
@@ -12,8 +14,9 @@ import requests
 # Timeout strict sur les requêtes réseau légères de vérification de
 # version (version.json) et de notification (ntfy). Au-delà, la
 # vérification est traitée comme un échec réseau et on se rabat
-# silencieusement sur la version installée (voir CONTEXTE.md,
-# « Vérification réseau — timeout strict » et « Décisions actées »).
+# silencieusement sur la version installée (voir
+# docs/contexte/demarrage_reseau.md, « Vérification réseau — timeout
+# strict »).
 TIMEOUT_VERSION_SECONDES = 5
 
 # Timeout distinct, plus généreux, pour le téléchargement du zip de
@@ -26,8 +29,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # ``HEAD`` est une référence spéciale reconnue par raw.githubusercontent.com
 # qui résout toujours vers la branche par défaut du dépôt, sans avoir à la
-# connaître à l'avance ni à passer par l'API GitHub (voir CONTEXTE.md,
-# « Deux fichiers version.json distincts »).
+# connaître à l'avance ni à passer par l'API GitHub (voir
+# docs/contexte/versioning.md, « Deux fichiers `version.json` distincts »).
 _GABARIT_URL_VERSION_JSON = "https://raw.githubusercontent.com/{depot}/HEAD/version.json"
 
 
@@ -35,13 +38,15 @@ def verifier_version(depot_github: str, build_installe: int) -> dict[str, Any] |
     """Vérifie si une nouvelle version est disponible pour ``depot_github``.
 
     Récupère le version.json distant (``{"build": N, "sha256": "..."}``,
-    voir CONTEXTE.md « Format de version ») avec le timeout strict
-    ``TIMEOUT_VERSION_SECONDES``, et le compare à ``build_installe``.
+    voir docs/contexte/versioning.md « Format de version ») avec le
+    timeout strict ``TIMEOUT_VERSION_SECONDES``, et le compare à
+    ``build_installe``.
 
     Retourne le version.json distant si une nouvelle version est
     disponible (``distant.build > build_installe``), sinon ``None``
     (pas de mise à jour, ou échec réseau/timeout — repli silencieux,
-    voir CONTEXTE.md « Décisions actées »).
+    voir docs/contexte/demarrage_reseau.md « Vérification réseau —
+    timeout strict »).
     """
     url = _GABARIT_URL_VERSION_JSON.format(depot=depot_github)
 
@@ -60,7 +65,8 @@ def verifier_version(depot_github: str, build_installe: int) -> dict[str, Any] |
         return None
 
     # Comparaison entière stricte — jamais de comparaison de chaînes
-    # (voir CONTEXTE.md, piège « "9" > "10" » lexicographique).
+    # (voir docs/contexte/versioning.md, « Format de version », piège
+    # « "9" > "10" » lexicographique).
     if int(build_distant) > build_installe:
         return distant
 

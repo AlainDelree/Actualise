@@ -3,8 +3,9 @@
 Aucune exécution réelle de sous-processus ni appel réseau : ``Popen``
 et les fonctions des autres modules (``config``, ``mise_a_jour``,
 ``version_check``, ``notifications``) sont simulés via
-``unittest.mock``. Voir CONTEXTE.md, « Séquence de démarrage —
-vérification non bloquante » et « Garde-fou anti-boucle infinie ».
+``unittest.mock``. Voir docs/contexte/demarrage_reseau.md, « Séquence
+de démarrage — vérification non bloquante » et
+docs/contexte/bascule_mise_a_jour.md, « Garde-fou anti-boucle infinie ».
 
 Exception à cette règle : ``TestGabaritUpdaterBat`` (issue #68) exécute
 réellement le ``updater.bat`` généré par ``_generer_updater_bat`` dans
@@ -1019,11 +1020,12 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
 
 
 class TestMain(unittest.TestCase):
-    """Voir CONTEXTE.md : ``main()`` doit loguer toute exception fatale
-    non anticipée par les except existants avant de la laisser se
-    propager (sinon ``actualise.log`` reste vide en ``--noconsole``),
-    sans jamais intercepter le ``SystemExit(0)`` volontaire du garde-fou
-    anti-boucle.
+    """``main()`` doit loguer toute exception fatale non anticipée par
+    les except existants avant de la laisser se propager (sinon
+    ``actualise.log`` reste vide en ``--noconsole``, voir CONTEXTE.md,
+    architecture), sans jamais intercepter le ``SystemExit(0)``
+    volontaire du garde-fou anti-boucle (voir
+    docs/contexte/bascule_mise_a_jour.md).
     """
 
     def setUp(self):

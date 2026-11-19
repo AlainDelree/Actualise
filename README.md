@@ -20,10 +20,10 @@ disponibles (pour lui-même et pour l'application cible) ; toute mise à
 jour trouvée est appliquée au lancement suivant, jamais pendant la
 session en cours.
 
-Voir [CONTEXTE.md](CONTEXTE.md) pour le rapport de conception
-complet (architecture détaillée, format de version, distribution des
-binaires, manifeste de mise à jour, séquence de démarrage, garde-fou
-anti-boucle infinie, et l'ensemble des décisions actées) et
+Voir [CONTEXTE.md](CONTEXTE.md) pour les règles invariantes et l'index
+des fichiers de domaine sous [docs/contexte/](docs/contexte/) (format
+de version, distribution des binaires, manifeste de mise à jour,
+séquence de démarrage, garde-fou anti-boucle infinie, etc.) et
 [INTEGRATION.md](INTEGRATION.md) pour le guide pratique d'intégration
 d'une nouvelle application cible.
 
