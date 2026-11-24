@@ -38,9 +38,12 @@ AppPublisher=Alain Delree
 DefaultDirName=C:\Actualise
 DisableDirPage=yes
 DisableProgramGroupPage=yes
-; C:\ est inaccessible en écriture aux utilisateurs standards ; admin est
-; requis pour créer/écrire C:\Actualise\ (voir INTEGRATION.md, §3 "Droits
-; d'installation" — incident réel documenté avec PrivilegesRequired=lowest).
+; admin est requis pour que les constantes InnoSetup "tous les
+; utilisateurs" résolvent correctement (voir INTEGRATION.md, §3 "Droits
+; d'installation" — incident réel documenté avec PrivilegesRequired=lowest :
+; ces emplacements ne sont alors pas utilisés et Actualise n'est pas
+; déployé). C:\Actualise\ lui-même n'est protégé par aucune règle de
+; droits posée par ce setup (voir SEC-022 dans .audit.json).
 PrivilegesRequired=admin
 OutputDir=output
 OutputBaseFilename=Actualise-Setup-v{#ActualiseVersion}
