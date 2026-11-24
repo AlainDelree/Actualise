@@ -6,12 +6,16 @@ voir aussi INTEGRATION.md pour le guide pratique d'intégration complet,
 
 1. **`Actualise-Setup.exe`** (`installeur/actualise.iss`) — installeur
    dédié à Actualise lui-même, indépendant de toute application cible.
-   Il installe l'instance **partagée** dans un dossier **fixe et non
-   modifiable par l'utilisateur** (`DefaultDirName=C:\Actualise`,
-   `DisableDirPage=yes`), avec `PrivilegesRequired=admin` (`C:\` racine
-   du disque système, inaccessible en écriture aux utilisateurs
-   standards ; incident réel documenté avec `PrivilegesRequired=lowest`
-   — voir INTEGRATION.md). Il dépose les trois éléments constitutifs
+   Il installe l'instance **partagée** dans un dossier **fixe, sans
+   choix laissé à l'utilisateur** (`DefaultDirName=C:\Actualise`,
+   `DisableDirPage=yes`), avec `PrivilegesRequired=admin` (requis pour
+   que les constantes InnoSetup « tous les utilisateurs » résolvent
+   correctement ; incident réel documenté avec
+   `PrivilegesRequired=lowest` — voir INTEGRATION.md). Le dossier
+   `C:\Actualise\` lui-même n'est protégé par aucune règle de droits
+   posée par ce setup : en pratique il reste modifiable en écriture par
+   tous les utilisateurs locaux du PC (voir `.audit.json`, SEC-022, pour
+   le risque accepté). Il dépose les trois éléments constitutifs
    d'Actualise :
    - `Actualise.exe` ;
    - `_internal\` (dossier complet, jamais l'exe seul — un `_internal\`
