@@ -89,6 +89,18 @@ sidecar) est retiré de la zone d'attente plutôt que rejoué à chaque
 lancement, pour être retéléchargé avec son empreinte au prochain
 contrôle.
 
+**Nettoyage des sidecars orphelins (issue #105, point 4).** Le bat de
+mise à jour (Actualise comme un jeu) supprime `%ZIP%` et `%ZIP%.sha256`
+une fois la bascule terminée avec succès ; les gabarits antérieurs à
+cette issue ne supprimaient que le zip, laissant le sidecar orphelin en
+zone d'attente (constaté le 26/11 : `actualise_14.zip.sha256`,
+`scrabble_15.zip.sha256`). `_nettoyer_empreintes_orphelines`, appelée au
+tout début de `appliquer_mises_a_jour_en_attente` (étape 4 de la
+séquence de démarrage, à chaque lancement), supprime tout fichier
+`*.zip.sha256` de la zone d'attente dont le zip correspondant n'existe
+plus — qu'il s'agisse d'un résidu déjà présent ou d'un nouveau cas —
+sans jamais toucher à l'empreinte d'un zip encore présent.
+
 ## Limite connue : zip non re-contrôlé entre génération et lancement du bat (audit issue #92)
 
 L'empreinte SHA-256 est contrôlée au téléchargement, puis re-contrôlée à
@@ -139,24 +151,41 @@ rejoué à chaque lancement) ; un zip illisible (`BadZipFile`) est traité
 comme transitoire (zip conservé pour une nouvelle tentative), jamais
 comme une évasion.
 
-## Noms d'entrées de premier niveau d'un zip de jeu (audit issue #117, SEC-024)
+## Noms d'entrées de premier niveau d'un zip de jeu (audit issue #117, SEC-024 ; ASCII : issue #105)
 
 Le bat de mise à jour d'un jeu reçoit les noms d'entrées de premier
 niveau de l'archive (`_lister_entrees_racine_zip`) et les écrit
 directement dans des commandes batch (`_bloc_bascule_entree_jeu` et les
 blocs d'annulation/nettoyage associés), sans échappement. Avant de
 générer ce bat, `_assurer_maj_jeu_en_attente` valide donc chaque nom
-d'entrée avec `_entree_racine_jeu_valide` : liste blanche prudente (dans
-l'esprit de `_nom_jeu_valide`, qui valide déjà le nom de l'application
-elle-même) qui accepte les noms réels de premier niveau d'un zip de jeu
-— lettres (y compris accentuées), chiffres, espaces et points internes
-(ex. `Scrabble.exe`, `_internal`, `data`) — mais refuse un nom vide, `.`
-ou `..` (ou en contenant), un nom commençant/finissant par un espace ou
-un point, tout caractère de contrôle, tout séparateur de chemin, tout
-chemin absolu/lecteur, et les caractères spéciaux de cmd.exe (`%`, `!`,
-`^`, `&`, `|`, `<`, `>`, `"`) qui permettraient une injection de
-commande dans le bat généré. Un nom rejeté est traité comme une évasion
-de chemin : zip et empreinte retirés, ni bat ni flag écrits.
+d'entrée avec `_entree_racine_jeu_valide` : **liste de refus** (pas une
+liste blanche — dans l'esprit de `_nom_jeu_valide`, qui valide déjà le
+nom de l'application elle-même), qui refuse :
+
+- un nom vide, `.` ou `..` (ou en contenant) ;
+- un nom commençant ou finissant par un espace ou un point ;
+- tout caractère de contrôle, tout séparateur de chemin (`/`, `\`),
+  tout chemin absolu/lecteur (`:`) ;
+- les caractères spéciaux de cmd.exe (`%`, `!`, `^`, `&`, `|`, `<`, `>`,
+  `"`) qui permettraient une injection de commande dans le bat généré ;
+- (depuis l'issue #105) tout caractère non ASCII — un nom accentué,
+  jusque-là accepté, est désormais refusé : le bat généré est écrit en
+  UTF-8 sans changement de page de code, un tel nom y serait mal lu par
+  cmd, la bascule échouerait puis serait annulée, silencieusement pour
+  l'utilisateur (seule trace : le journal d'Actualise). Les 35 noms
+  réels de premier niveau du zip de Scrabble (v15) sont tous en ASCII et
+  continuent d'être acceptés.
+
+Tout le reste est accepté, y compris `( ) , ; =` (décision d'Alain :
+sans effet dans les blocs batch générés, les noms y étant entre
+guillemets ou à un endroit du bat où ils n'ont pas de sens particulier)
+et les noms de périphériques Windows (`nul`, `con`, `aux`…, non refusés,
+sans risque connu car absents de tout zip réel). Un nom rejeté est
+traité comme une évasion de chemin : zip et empreinte retirés, ni bat ni
+flag écrits, et la notification ntfy « mise à jour disponible » n'est
+alors pas envoyée pour ce zip (voir
+`docs/contexte/maj_application_cible.md`, « Bat généré dynamiquement
+selon le contenu du zip »).
 
 ## Bootstrap séparé (écarté)
 

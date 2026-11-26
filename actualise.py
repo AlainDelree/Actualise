@@ -187,7 +187,7 @@ def _nom_jeu_valide(nom: str) -> bool:
 # s'ils apparaissent tels quels dans une entrée de zip écrite sans
 # échappement dans les commandes batch générées (``_bloc_bascule_entree_jeu``,
 # ``_bloc_annulation_entree_jeu``, ``_bloc_nettoyage_backup_jeu`` — voir
-# SEC-024, audit issue #117).
+# SEC-024, audit issue #117). Refusés par la liste de refus ci-dessous.
 _CARACTERES_SPECIAUX_CMD = frozenset('%!^&|<>"')
 
 # Caractères de contrôle et séparateurs de chemin interdits dans une entrée
@@ -203,22 +203,32 @@ def _entree_racine_jeu_valide(nom_entree: str) -> bool:
     les commandes batch générées pour ce nom (``_bloc_bascule_entree_jeu``
     et consorts) — SEC-024, audit issue #117.
 
-    Liste blanche prudente dans l'esprit de ``_nom_jeu_valide``, mais qui
-    doit accepter tous les noms réels de premier niveau d'un zip de jeu
-    (voir INTEGRATION.md, « zip à plat » : exécutable et ``_internal\\``
-    directement à la racine, éventuels autres dossiers de ressources) :
-    accepte donc les lettres accentuées, espaces et points internes
-    (ex. ``Scrabble.exe``, ``_internal``, ``data``), mais refuse un nom
-    vide, ``.`` ou ``..`` (ou en contenant), un nom commençant ou finissant
-    par un espace ou un point, tout caractère de contrôle, tout séparateur
-    de chemin, tout chemin absolu/lecteur, et les caractères spéciaux de
-    cmd.exe listés dans ``_CARACTERES_SPECIAUX_CMD``.
+    **Liste de refus**, pas une liste blanche : refuse un nom vide, ``.``
+    ou ``..`` (ou en contenant), un nom commençant ou finissant par un
+    espace ou un point, tout caractère de contrôle, tout séparateur de
+    chemin, tout chemin absolu/lecteur (``:``), les caractères spéciaux de
+    cmd.exe listés dans ``_CARACTERES_SPECIAUX_CMD``, et (depuis l'issue
+    #105) tout caractère non ASCII — tout le reste est accepté, y compris
+    ``( ) , ; =`` (décision d'Alain : sans effet dans les blocs batch
+    générés, les noms y étant entre guillemets ou à un endroit du bat où
+    ils n'ont pas de sens particulier) et les noms de périphériques
+    Windows (``nul``, ``con``, ``aux``…, sans risque connu car absents de
+    tout zip réel). Un nom accentué, jusqu'ici accepté, est désormais
+    refusé : les 35 noms réels de premier niveau du zip de Scrabble v15
+    sont tous en ASCII (voir INTEGRATION.md, « zip à plat », et
+    `tests/test_actualise.py::TestEntreeRacineJeuValide`) ; un bat généré
+    avec un nom accentué serait de toute façon mal interprété par cmd
+    (écrit en UTF-8 sans changement de page de code), la bascule
+    échouerait puis serait annulée — ce refus en amont rend l'échec
+    immédiat et journalisé plutôt que silencieux côté bat.
     """
     if not nom_entree or nom_entree in (".", ".."):
         return False
     if ".." in nom_entree:
         return False
     if nom_entree[0] in " ." or nom_entree[-1] in " .":
+        return False
+    if not nom_entree.isascii():
         return False
     if _RE_ENTREE_RACINE_JEU_INTERDITE.search(nom_entree):
         return False
@@ -307,6 +317,24 @@ def _nettoyer_ancien_executable() -> None:
         shutil.rmtree(dossier_internal_ancien, ignore_errors=True)
 
 
+def _nettoyer_empreintes_orphelines(zone_attente: Path) -> None:
+    """Supprime, dans ``zone_attente``, tout fichier d'empreinte
+    ``*.zip.sha256`` dont le zip correspondant n'existe plus (issue
+    #105, point 4) — ex. résidu laissé par le bat de mise à jour, qui
+    supprime ``%ZIP%`` après une bascule réussie sans supprimer son
+    sidecar ``.sha256``. Ne touche jamais à l'empreinte d'un zip encore
+    présent. Appelée à chaque démarrage, pour nettoyer aussi bien les
+    résidus déjà présents (orphelins constatés le 26/11, ex.
+    ``actualise_14.zip.sha256``) que les nouveaux.
+    """
+    if not zone_attente.is_dir():
+        return
+    for chemin_empreinte in zone_attente.glob("*.zip.sha256"):
+        chemin_zip = chemin_empreinte.with_suffix("")
+        if not chemin_zip.exists():
+            chemin_empreinte.unlink(missing_ok=True)
+
+
 def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
     """Applique, au lancement, les mises à jour mises en attente au
     cycle précédent (étape 4 de la séquence de démarrage).
@@ -323,6 +351,7 @@ def appliquer_mises_a_jour_en_attente(est_enfant: bool, nom_app: str) -> None:
 
     try:
         zone_attente = Path(configuration["zone_attente"])
+        _nettoyer_empreintes_orphelines(zone_attente)
 
         cibles = [
             ("actualise", configuration["actualise"], config.chemin_config_portable()),
@@ -684,6 +713,7 @@ if errorlevel 1 (
 call :log "build_installe reecrit a %BUILD%."
 
 del /f "%ZIP%" 2>nul
+del /f "%ZIP%.sha256" 2>nul
 del /f "%FLAG%" 2>nul
 call :log "Zip et flag supprimes, mise a jour terminee avec succes."
 
@@ -965,6 +995,7 @@ if errorlevel 1 (
 call :log "build_installe reecrit a %BUILD%."
 
 del /f "%ZIP%" 2>nul
+del /f "%ZIP%.sha256" 2>nul
 del /f "%FLAG%" 2>nul
 call :log "Zip et flag supprimes, mise a jour terminee avec succes."
 
@@ -1177,11 +1208,23 @@ def _assurer_maj_jeu_en_attente(
     repertoire_installation: Path,
     chemin_zip: Path,
     build_zip: int,
-) -> None:
+) -> bool:
     """Génère, si besoin, le bat + le flag de mise à jour pour
     l'application cible (le « jeu »), généralisation du mécanisme
     flag + updater.bat déjà en place pour Actualise lui-même (voir
     docs/contexte/maj_application_cible.md).
+
+    **Valeur de retour** (issue #105, point 3) : ``False`` seulement pour
+    les trois rejets qui laissent le zip sans aucun bat/flag régénérable
+    (nom d'application invalide, évasion de chemin, nom d'entrée de
+    premier niveau invalide) — l'appelant (``tache_verification_arriere_plan``)
+    s'en sert pour ne pas envoyer la notification ntfy « mise à jour
+    disponible » dans ces cas, puisqu'elle serait fausse (le zip vient
+    d'être retiré, ou ne le sera jamais avec ce nom). ``True`` dans tous
+    les autres cas, y compris le report « flag déjà en attente » ci-dessous
+    (la mise à jour reste bien disponible, juste différée) et les échecs
+    transitoires (``OSError``/``BadZipFile``, zip conservé pour nouvelle
+    tentative) : comportement ntfy inchangé pour ces cas.
 
     **Validation du nom (règle de sécurité, issue #84)** : ``nom_app``
     sert à construire le nom du bat (``updater_<nom_app>.bat``, voir
@@ -1225,7 +1268,7 @@ def _assurer_maj_jeu_en_attente(
             "mise à jour refusée, aucun fichier écrit.",
             nom_app,
         )
-        return
+        return False
 
     dossier_actualise = config.chemin_config_portable()
     chemin_flag = repertoire_installation / _NOM_FLAG_MAJ_ACTUALISE
@@ -1239,7 +1282,7 @@ def _assurer_maj_jeu_en_attente(
                 build_zip,
                 repertoire_installation,
             )
-            return
+            return True
         _LOGGER.info(
             "Flag de mise à jour périmé pour %s (ancien emplacement de bat hors "
             "du dossier d'Actualise) : régénération au nouvel emplacement.",
@@ -1274,7 +1317,7 @@ def _assurer_maj_jeu_en_attente(
         )
         chemin_zip.unlink(missing_ok=True)
         _chemin_empreinte_zip(chemin_zip).unlink(missing_ok=True)
-        return
+        return False
     except zipfile.BadZipFile:
         # Zip illisible : transitoire, laissé à la lecture du manifeste
         # (``appliquer_mises_a_jour_en_attente``) ou à la tentative
@@ -1291,7 +1334,7 @@ def _assurer_maj_jeu_en_attente(
             build_zip,
             erreur,
         )
-        return
+        return True
 
     entrees_invalides = [nom for nom in entrees_racine if not _entree_racine_jeu_valide(nom)]
     if entrees_invalides:
@@ -1311,7 +1354,7 @@ def _assurer_maj_jeu_en_attente(
         )
         chemin_zip.unlink(missing_ok=True)
         _chemin_empreinte_zip(chemin_zip).unlink(missing_ok=True)
-        return
+        return False
 
     try:
         chemin_bat = _generer_updater_bat_jeu(
@@ -1333,7 +1376,7 @@ def _assurer_maj_jeu_en_attente(
             build_zip,
             erreur,
         )
-        return
+        return True
 
     try:
         _ecrire_flag_maj(repertoire_installation, chemin_bat, dossier_actualise, type_maj="jeu")
@@ -1353,9 +1396,10 @@ def _assurer_maj_jeu_en_attente(
             erreur,
         )
         chemin_bat.unlink(missing_ok=True)
-        return
+        return True
 
     _nettoyer_ancien_bat_jeu(repertoire_installation)
+    return True
 
 
 def _url_asset_release(depot_github: str, build: int, prefixe: str) -> str:
@@ -1490,14 +1534,21 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
                 # fait rien si un flag est déjà en attente dans ce
                 # dossier (ex. mise à jour
                 # d'Actualise traitée juste au-dessus dans cette même
-                # itération : elle passe toujours en premier).
-                _assurer_maj_jeu_en_attente(
+                # itération : elle passe toujours en premier). Si le zip
+                # vient d'être rejeté et retiré (nom d'application ou
+                # d'entrée invalide, évasion de chemin — issue #105,
+                # point 3), la valeur de retour vaut ``False`` : on saute
+                # alors la notification ci-dessous, qui serait fausse
+                # (« mise à jour disponible » alors que le zip n'existe
+                # plus).
+                if not _assurer_maj_jeu_en_attente(
                     nom_app,
                     bloc_config,
                     Path(bloc_config["repertoire_installation"]),
                     chemin_zone_attente,
                     build_distant,
-                )
+                ):
+                    continue
 
             notifications.notifier_ntfy(
                 configuration["topic_ntfy"],

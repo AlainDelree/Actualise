@@ -33,6 +33,7 @@ from actualise import (
     _entree_racine_jeu_valide,
     _generer_updater_bat,
     _generer_updater_bat_jeu,
+    _nettoyer_empreintes_orphelines,
     _nom_jeu_valide,
     appliquer_mises_a_jour_en_attente,
     configurer_logging,
@@ -547,6 +548,61 @@ class TestAppliquerMisesAJourEnAttente(unittest.TestCase):
 
         self.assertTrue(any("config_actualise.json" in message for message in journal.output))
 
+    def test_empreinte_orpheline_supprimee_empreinte_zip_present_conservee(self):
+        # Issue #105, point 4 : un fichier ``<zip>.sha256`` dont le zip n'
+        # existe plus (résidu laissé par le bat après une bascule réussie)
+        # doit être supprimé au démarrage ; l'empreinte d'un zip encore
+        # présent en zone d'attente ne doit jamais être touchée.
+        empreinte_orpheline = self.zone_attente / "actualise_11.zip.sha256"
+        empreinte_orpheline.write_text("peu importe", encoding="utf-8")
+
+        chemin_zip_present = self.zone_attente / "scrabble_48.zip"
+        _creer_zip_avec_manifest(chemin_zip_present, build=48)
+        _creer_empreinte_valide(chemin_zip_present)
+
+        with patch("actualise.mise_a_jour") as mock_mise_a_jour, patch(
+            "actualise._generer_updater_bat_jeu"
+        ) as mock_generer_bat_jeu, patch("actualise._ecrire_flag_maj"):
+            mock_mise_a_jour.verifier_sha256.return_value = True
+            mock_generer_bat_jeu.return_value = self.repertoire_cible / "updater.bat"
+
+            appliquer_mises_a_jour_en_attente(est_enfant=False, nom_app="scrabble")
+
+        self.assertFalse(empreinte_orpheline.exists())
+        self.assertTrue((self.zone_attente / "scrabble_48.zip.sha256").exists())
+
+
+class TestNettoyerEmpreintesOrphelines(unittest.TestCase):
+    """Issue #105, point 4 : ``_nettoyer_empreintes_orphelines`` testée
+    directement, indépendamment de ``appliquer_mises_a_jour_en_attente``.
+    """
+
+    def setUp(self):
+        self.dossier_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dossier_temp.cleanup)
+        self.zone_attente = Path(self.dossier_temp.name) / "attente"
+        self.zone_attente.mkdir()
+
+    def test_empreinte_sans_zip_supprimee(self):
+        empreinte = self.zone_attente / "scrabble_15.zip.sha256"
+        empreinte.write_text("abc", encoding="utf-8")
+
+        _nettoyer_empreintes_orphelines(self.zone_attente)
+
+        self.assertFalse(empreinte.exists())
+
+    def test_empreinte_avec_zip_conservee(self):
+        (self.zone_attente / "actualise_14.zip").write_bytes(b"contenu")
+        empreinte = self.zone_attente / "actualise_14.zip.sha256"
+        empreinte.write_text("abc", encoding="utf-8")
+
+        _nettoyer_empreintes_orphelines(self.zone_attente)
+
+        self.assertTrue(empreinte.exists())
+
+    def test_zone_attente_inexistante_aucune_exception(self):
+        _nettoyer_empreintes_orphelines(self.zone_attente / "n_existe_pas")
+
 
 class TestNomJeuValide(unittest.TestCase):
     def test_noms_valides(self):
@@ -572,11 +628,58 @@ class TestNomJeuValide(unittest.TestCase):
                 self.assertFalse(_nom_jeu_valide(nom))
 
 
+# Noms de premier niveau représentatifs d'un zip Scrabble v15 réel (zip à
+# plat, voir INTEGRATION.md) : exécutable, dossier PyInstaller, DLL/``.pyd``
+# de la distribution Python embarquée (dont des noms à tiret, ex.
+# ``libssl-3.dll``), ressources du jeu. Reconstitués pour ce test (le dépôt
+# Scrabble n'est pas dans le périmètre de ce dépôt) à partir de la structure
+# PyInstaller ``--onedir`` documentée — tous en ASCII, comme les 35 noms
+# réels (issue #105, point 2).
+_NOMS_REELS_SCRABBLE_V15 = [
+    "Scrabble.exe",
+    "_internal",
+    "manifest.json",
+    "data",
+    "assets",
+    "sons",
+    "images",
+    "dictionnaires",
+    "sauvegardes",
+    "Scrabble.ico",
+    "python311.dll",
+    "python3.dll",
+    "libssl-3.dll",
+    "libcrypto-3.dll",
+    "libffi-8.dll",
+    "sqlite3.dll",
+    "tcl86t.dll",
+    "tk86t.dll",
+    "VCRUNTIME140.dll",
+    "VCRUNTIME140_1.dll",
+    "MSVCP140.dll",
+    "base_library.zip",
+    "unicodedata.pyd",
+    "_socket.pyd",
+    "_ssl.pyd",
+    "_hashlib.pyd",
+    "_lzma.pyd",
+    "_bz2.pyd",
+    "_decimal.pyd",
+    "select.pyd",
+    "pyexpat.pyd",
+    "charset_normalizer-3.3.2.dist-info",
+    "certifi",
+    "webview",
+    "LICENSE.txt",
+]
+
+
 class TestEntreeRacineJeuValide(unittest.TestCase):
     """SEC-024 (audit issue #117) : ``_entree_racine_jeu_valide`` doit
     accepter tous les noms réels de premier niveau d'un zip de jeu (voir
     INTEGRATION.md, « zip à plat ») mais refuser tout ce qui pourrait
-    s'injecter dans les commandes batch générées sans échappement.
+    s'injecter dans les commandes batch générées sans échappement —
+    **liste de refus**, pas liste blanche (issue #105, point 1).
     """
 
     def test_noms_reels_valides(self):
@@ -586,18 +689,27 @@ class TestEntreeRacineJeuValide(unittest.TestCase):
             "_internal",
             "data",
             "manifest.json",
-            "Écran de jeu",
-            "Données",
             "jeu-2_v2",
+            "nom (avec) des, caracteres; = varies",
         ]:
+            with self.subTest(nom=nom):
+                self.assertTrue(_entree_racine_jeu_valide(nom))
+
+    def test_noms_reels_scrabble_v15_acceptes(self):
+        # Issue #105, point 2 : les 35 noms réels de premier niveau du zip
+        # Scrabble v15 (représentatifs, voir _NOMS_REELS_SCRABBLE_V15 — tous
+        # ASCII, dont des noms à tiret comme ``libssl-3.dll``) doivent
+        # continuer à être acceptés malgré le nouveau refus du non-ASCII.
+        self.assertEqual(len(_NOMS_REELS_SCRABBLE_V15), 35)
+        for nom in _NOMS_REELS_SCRABBLE_V15:
             with self.subTest(nom=nom):
                 self.assertTrue(_entree_racine_jeu_valide(nom))
 
     def test_noms_invalides(self):
         # Vide, ".", "..", caractère de contrôle, séparateur de chemin,
-        # chemin absolu/lecteur, espace/point en tête ou en fin, et
-        # caractères spéciaux de cmd.exe susceptibles d'une injection de
-        # commande.
+        # chemin absolu/lecteur, espace/point en tête ou en fin, caractères
+        # spéciaux de cmd.exe susceptibles d'une injection de commande, et
+        # (issue #105, point 2) tout caractère non ASCII.
         for nom in [
             "",
             ".",
@@ -619,6 +731,11 @@ class TestEntreeRacineJeuValide(unittest.TestCase):
             "jeu<nom",
             "jeu>nom",
             'jeu"nom',
+            "Écran de jeu",
+            "Données",
+            "café",
+            "日本語",
+            "jeué",
         ]:
             with self.subTest(nom=nom):
                 self.assertFalse(_entree_racine_jeu_valide(nom))
@@ -1111,7 +1228,7 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
 
         with patch("actualise.version_check") as mock_version_check, patch(
             "actualise.mise_a_jour.telecharger_zip"
-        ) as mock_telecharger, patch("actualise.notifications"), patch(
+        ) as mock_telecharger, patch("actualise.notifications") as mock_notifications, patch(
             "actualise._generer_updater_bat_jeu"
         ) as mock_generer_bat_jeu, patch("actualise._ecrire_flag_maj") as mock_ecrire_flag, self.assertLogs(
             "actualise", level="ERROR"
@@ -1123,11 +1240,76 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
 
             mock_generer_bat_jeu.assert_not_called()
             mock_ecrire_flag.assert_not_called()
+            # Issue #105, point 3 : le zip vient d'être retiré, la
+            # notification « mise à jour disponible » serait fausse.
+            mock_notifications.notifier_ntfy.assert_not_called()
 
         self.assertFalse((self.zone_attente / "scrabble_48.zip").exists())
         self.assertFalse((dossier_jeu / "actualise_update.flag").exists())
         self.assertFalse((dossier_actualise / "updater_scrabble.bat").exists())
         self.assertTrue(any("invalide" in message.lower() for message in journal.output))
+
+    def test_nom_entree_non_ascii_rejetee_sans_bat_ni_flag_ni_notification(self):
+        # Issue #105, points 2 et 3 : une entrée de premier niveau non
+        # ASCII (ex. nom accentué) doit être refusée comme une évasion de
+        # chemin — zip et empreinte retirés, aucune notification trompeuse.
+        chemin_temp_scrabble = Path(self.dossier_temp.name) / "telecharge_scrabble_tmp.zip"
+        with zipfile.ZipFile(chemin_temp_scrabble, "w") as archive:
+            archive.writestr("manifest.json", json.dumps({"supprimer": []}))
+            archive.writestr("Écran de jeu", "accentue")
+
+        dossier_jeu = Path(self.dossier_temp.name) / "jeu_install"
+        dossier_jeu.mkdir()
+        self.configuration["application_cible"]["repertoire_installation"] = str(dossier_jeu)
+
+        dossier_actualise = Path(self.dossier_temp.name) / "actualise_install"
+        dossier_actualise.mkdir()
+        self.mock_config.chemin_config_portable.return_value = dossier_actualise
+
+        with patch("actualise.version_check") as mock_version_check, patch(
+            "actualise.mise_a_jour.telecharger_zip"
+        ) as mock_telecharger, patch("actualise.notifications") as mock_notifications, patch(
+            "actualise._generer_updater_bat_jeu"
+        ) as mock_generer_bat_jeu, patch("actualise._ecrire_flag_maj") as mock_ecrire_flag:
+            mock_version_check.verifier_version.side_effect = [None, {"build": 48, "sha256": "x"}]
+            mock_telecharger.return_value = chemin_temp_scrabble
+
+            tache_verification_arriere_plan("scrabble")
+
+            mock_generer_bat_jeu.assert_not_called()
+            mock_ecrire_flag.assert_not_called()
+            mock_notifications.notifier_ntfy.assert_not_called()
+
+        self.assertFalse((self.zone_attente / "scrabble_48.zip").exists())
+        self.assertFalse((self.zone_attente / "scrabble_48.zip.sha256").exists())
+
+    def test_jeu_zip_accepte_notification_toujours_envoyee(self):
+        # Non-régression : un zip de jeu accepté continue de déclencher la
+        # notification ntfy (contrairement aux rejets ci-dessus).
+        chemin_temp_scrabble = Path(self.dossier_temp.name) / "telecharge_scrabble_tmp.zip"
+        with zipfile.ZipFile(chemin_temp_scrabble, "w") as archive:
+            archive.writestr("manifest.json", json.dumps({"supprimer": []}))
+            archive.writestr("Scrabble.exe", "nouveau")
+
+        dossier_jeu = Path(self.dossier_temp.name) / "jeu_install"
+        dossier_jeu.mkdir()
+        self.configuration["application_cible"]["repertoire_installation"] = str(dossier_jeu)
+
+        dossier_actualise = Path(self.dossier_temp.name) / "actualise_install"
+        dossier_actualise.mkdir()
+        self.mock_config.chemin_config_portable.return_value = dossier_actualise
+
+        with patch("actualise.version_check") as mock_version_check, patch(
+            "actualise.mise_a_jour.telecharger_zip"
+        ) as mock_telecharger, patch("actualise.notifications") as mock_notifications:
+            mock_version_check.verifier_version.side_effect = [None, {"build": 48, "sha256": "x"}]
+            mock_telecharger.return_value = chemin_temp_scrabble
+
+            tache_verification_arriere_plan("scrabble")
+
+            mock_notifications.notifier_ntfy.assert_called_once()
+
+        self.assertTrue((dossier_jeu / "actualise_update.flag").exists())
 
     def test_pas_de_mise_a_jour_ne_fait_rien(self):
         with patch("actualise.version_check") as mock_version_check, patch(

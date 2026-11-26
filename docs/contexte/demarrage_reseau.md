@@ -36,7 +36,13 @@ arrière-plan, puis se termine.
        toucher à l'installation existante ;
    - si une nouvelle version a été téléchargée **et validée**, envoie une
      **notification ntfy informative** (mise à jour prête, effective au
-     prochain lancement).
+     prochain lancement) — sauf pour une mise à jour de jeu dont le zip,
+     pourtant validé au téléchargement, est ensuite rejeté par
+     `_assurer_maj_jeu_en_attente` (nom d'application ou d'entrée de zip
+     invalide, évasion de chemin, voir
+     `docs/contexte/bascule_mise_a_jour.md`, « Noms d'entrées de premier
+     niveau d'un zip de jeu ») : cette notification serait alors fausse,
+     puisque le zip vient d'être retiré (issue #105, point 3).
 
 **Cycle de vie du processus Actualise.** Actualise ne lance plus
 l'application cible et n'a donc plus aucun lien avec son cycle de vie :

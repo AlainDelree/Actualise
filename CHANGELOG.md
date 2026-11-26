@@ -53,8 +53,8 @@ commandes batch (`_bloc_bascule_entree_jeu`, `_bloc_annulation_entree_jeu`,
 `_bloc_nettoyage_backup_jeu`), sans échappement — seul le nom de
 l'application (`nom_app`) était déjà validé. Ajout de
 `_entree_racine_jeu_valide` (`actualise.py`), appelée dans
-`_assurer_maj_jeu_en_attente` avant génération du bat : liste blanche
-prudente dans l'esprit de `_nom_jeu_valide`, mais qui accepte les noms
+`_assurer_maj_jeu_en_attente` avant génération du bat : liste de refus
+(pas une liste blanche) dans l'esprit de `_nom_jeu_valide`, qui accepte les noms
 réels de premier niveau d'un zip de jeu (lettres y compris accentuées,
 chiffres, espaces et points internes — ex. `Scrabble.exe`, `_internal`,
 `data`, voir INTEGRATION.md « zip à plat »). Refuse : nom vide, `.` ou

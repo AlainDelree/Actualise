@@ -76,11 +76,16 @@ mécanisme flag + bat, moyennant les adaptations suivantes :
   déplacement direct vers un nom encore existant, restauration complète
   de l'état initial au moindre échec, dans l'ordre inverse des éléments
   déjà basculés). Chaque nom d'entrée est validé avant génération du bat
-  (`_entree_racine_jeu_valide`, liste blanche contre l'injection de
-  commande dans les blocs batch générés — voir
-  `docs/contexte/bascule_mise_a_jour.md`, « Noms d'entrées de premier
-  niveau d'un zip de jeu », SEC-024). `manifest["supprimer"]` n'est en
-  revanche **pas**
+  (`_entree_racine_jeu_valide`, liste de refus contre l'injection de
+  commande dans les blocs batch générés, et depuis l'issue #105 contre
+  tout caractère non ASCII — voir `docs/contexte/bascule_mise_a_jour.md`,
+  « Noms d'entrées de premier niveau d'un zip de jeu », SEC-024). Un nom
+  d'entrée rejeté (zip et empreinte retirés, ni bat ni flag écrits) fait
+  aussi sauter la notification ntfy « mise à jour disponible » pour ce
+  zip côté `tache_verification_arriere_plan` — elle serait fausse
+  (issue #105, point 3) ; le cas « un flag est déjà en attente »
+  (mise à jour simplement reportée) continue, lui, d'envoyer cette
+  notification. `manifest["supprimer"]` n'est en revanche **pas**
   appliqué par ce bat (contrairement à l'ancienne extraction directe
   qu'il remplace) : limitation connue, le risque d'une implémentation
   batch générique de suppressions ciblées n'étant pas jugé proportionné

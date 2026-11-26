@@ -58,6 +58,7 @@ Actualise est une instance unique partagée entre toutes les applications cibles
 - Asset zip nommé `<prefixe>-v<build>.zip` (ex. `scrabble-v8.zip`) — Actualise construit l'URL dynamiquement à partir du numéro de build.
 - Tag GitHub : `v<build>` (ex. `v8`).
 - Le zip doit être à plat : exécutable et `_internal\` directement à la racine, sans sous-dossier intermédiaire.
+- **Les noms de premier niveau du zip doivent être en ASCII** (lettres/chiffres/ponctuation ASCII uniquement, pas d'accent) : Actualise les écrit tels quels dans le bat de mise à jour généré, sans échappement, et refuse tout nom contenant un caractère non ASCII (voir `docs/contexte/bascule_mise_a_jour.md`, « Noms d'entrées de premier niveau d'un zip de jeu »). Un nom accentué serait rejeté **à chaque lancement** (zip retiré, retéléchargé, rejeté à nouveau), sans aucun message visible pour l'utilisateur final — seulement dans le journal d'Actualise (`actualise.log`).
 - Inclure un `manifest.json` à la racine : `{"supprimer": []}`.
 - L'app cible doit publier son propre `version.json` à la racine du dépôt : `{"build": N, "sha256": "..."}`.
 
