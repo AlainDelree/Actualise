@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> None:
         # construire_commande_maj : la partie interne est quotée par
         # subprocess.list2cmdline à partir du chemin du bat (--bat) et,
         # s'il est présent, de --relancer. shell=True n'est pas utilisé.
-        subprocess.Popen(commande)  # noqa: S603
+        subprocess.Popen(commande)  # nosec B603
         fenetre.destroy()
 
     fenetre.protocol("WM_DELETE_WINDOW", plus_tard)

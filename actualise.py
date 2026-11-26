@@ -150,7 +150,7 @@ def _relancer_en_enfant(nom_app: str) -> None:
     # nom_app transmis comme un seul élément de la liste. nom_app vient de
     # l'argument --config et n'est pas validé à ce point (validation
     # ailleurs, pour le bat de jeu — issue #117 SEC-003).
-    subprocess.Popen(commande)  # noqa: S603
+    subprocess.Popen(commande)  # nosec B603
 
 
 _NOM_EXECUTABLE = "Actualise.exe"
