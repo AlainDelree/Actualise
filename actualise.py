@@ -143,7 +143,14 @@ def _relancer_en_enfant(nom_app: str) -> None:
     else:
         commande = [sys.executable, str(Path(__file__).resolve()), "--child", "--config", nom_app]
 
-    subprocess.Popen(commande)
+    # Relance d'Actualise sur lui-même : commande est une liste d'arguments
+    # (jamais shell=True, aucun shell n'interprète la ligne), composée de
+    # l'interpréteur ou de l'exécutable gelé, du chemin du script résolu
+    # dans le cas non gelé, du marqueur --child, puis de --config avec
+    # nom_app transmis comme un seul élément de la liste. nom_app vient de
+    # l'argument --config et n'est pas validé à ce point (validation
+    # ailleurs, pour le bat de jeu — issue #117 SEC-003).
+    subprocess.Popen(commande)  # noqa: S603
 
 
 _NOM_EXECUTABLE = "Actualise.exe"

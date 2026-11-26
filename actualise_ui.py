@@ -78,7 +78,11 @@ def main(argv: list[str] | None = None) -> None:
     def mettre_a_jour() -> None:
         chemin_flag.unlink(missing_ok=True)
         commande = construire_commande_maj(chemin_bat, arguments.relancer)
-        subprocess.Popen(commande)
+        # commande est une chaîne cmd /c "..." construite par
+        # construire_commande_maj : la partie interne est quotée par
+        # subprocess.list2cmdline à partir du chemin du bat (--bat) et,
+        # s'il est présent, de --relancer. shell=True n'est pas utilisé.
+        subprocess.Popen(commande)  # noqa: S603
         fenetre.destroy()
 
     fenetre.protocol("WM_DELETE_WINDOW", plus_tard)
