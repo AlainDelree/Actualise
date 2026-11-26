@@ -110,18 +110,53 @@ compromission de la source (SEC-023, risque accepté et consigné dans
 ActualiseUI au clic (ne couvrirait pas le lancement direct à la
 fermeture) ; contrôle dans le gabarit du bat (non retenu).
 
-## Garde anti-évasion de chemin (« zip-slip ») à l'application (audit issue #92, SEC-025)
+## Garde anti-évasion de chemin (« zip-slip ») à l'application (audit issues #92/#117, SEC-025)
 
 Une évasion de chemin détectée pendant l'extraction Python de
-l'auto-mise-à-jour d'Actualise (`mise_a_jour.extraire_zip`) est un saut
-propre (log + zip rejeté), plus une exception non rattrapée qui
-remontait jusqu'à planter le programme ; le chemin d'extraction
-différée d'un jeu (PowerShell `Expand-Archive` dans l'`updater.bat`
-généré) n'a pas cette garde — plutôt que la dupliquer en PowerShell, les
-entrées du zip sont validées côté Python avec la même garde
-(`mise_a_jour.valider_entrees_zip`, factorisée depuis `extraire_zip`)
-avant même de générer/lancer ce bat ; dans les deux cas, un zip rejeté
-est retiré de la zone d'attente (pas rejoué à chaque lancement).
+l'auto-mise-à-jour d'Actualise (`mise_a_jour.extraire_zip`, utilisée par
+`appliquer_mises_a_jour_en_attente` quand aucun flag n'est encore en
+attente) est un saut propre (log + zip rejeté), plus une exception non
+rattrapée qui remontait jusqu'à planter le programme. Les deux autres
+chemins d'extraction — tous deux par PowerShell `Expand-Archive` dans un
+`updater*.bat` généré, qui n'a pas cette garde — sont protégés sans la
+dupliquer en PowerShell : les entrées du zip sont validées côté Python
+avec la même garde (`mise_a_jour.valider_entrees_zip`, factorisée depuis
+`extraire_zip`) avant même de générer/lancer le bat correspondant,
+contre le dossier où `Expand-Archive` extrait réellement (`EXTRACT_DIR`
+du gabarit, le sous-dossier `maj_bat` sous le dossier sur lequel le bat
+fait `cd /d` en tout début de script — jamais le dossier d'installation
+lui-même) :
+
+- mise à jour d'un jeu, détectée au téléchargement ou relancée au
+  lancement suivant (`_assurer_maj_jeu_en_attente`) ;
+- mise à jour d'Actualise lui-même, détectée par la tâche de vérification
+  en arrière-plan (`tache_verification_arriere_plan`) — ce chemin n'avait
+  initialement aucune garde (SEC-025, audit issue #117, corrigé par
+  l'issue #103), contrairement aux deux autres déjà protégés.
+
+Dans les trois cas, un zip rejeté est retiré de la zone d'attente (pas
+rejoué à chaque lancement) ; un zip illisible (`BadZipFile`) est traité
+comme transitoire (zip conservé pour une nouvelle tentative), jamais
+comme une évasion.
+
+## Noms d'entrées de premier niveau d'un zip de jeu (audit issue #117, SEC-024)
+
+Le bat de mise à jour d'un jeu reçoit les noms d'entrées de premier
+niveau de l'archive (`_lister_entrees_racine_zip`) et les écrit
+directement dans des commandes batch (`_bloc_bascule_entree_jeu` et les
+blocs d'annulation/nettoyage associés), sans échappement. Avant de
+générer ce bat, `_assurer_maj_jeu_en_attente` valide donc chaque nom
+d'entrée avec `_entree_racine_jeu_valide` : liste blanche prudente (dans
+l'esprit de `_nom_jeu_valide`, qui valide déjà le nom de l'application
+elle-même) qui accepte les noms réels de premier niveau d'un zip de jeu
+— lettres (y compris accentuées), chiffres, espaces et points internes
+(ex. `Scrabble.exe`, `_internal`, `data`) — mais refuse un nom vide, `.`
+ou `..` (ou en contenant), un nom commençant/finissant par un espace ou
+un point, tout caractère de contrôle, tout séparateur de chemin, tout
+chemin absolu/lecteur, et les caractères spéciaux de cmd.exe (`%`, `!`,
+`^`, `&`, `|`, `<`, `>`, `"`) qui permettraient une injection de
+commande dans le bat généré. Un nom rejeté est traité comme une évasion
+de chemin : zip et empreinte retirés, ni bat ni flag écrits.
 
 ## Bootstrap séparé (écarté)
 

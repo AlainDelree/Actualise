@@ -30,6 +30,7 @@ from unittest.mock import call, patch
 from actualise import (
     _MARQUE_GABARIT_BAT_JEU,
     _assurer_maj_jeu_en_attente,
+    _entree_racine_jeu_valide,
     _generer_updater_bat,
     _generer_updater_bat_jeu,
     _nom_jeu_valide,
@@ -571,6 +572,58 @@ class TestNomJeuValide(unittest.TestCase):
                 self.assertFalse(_nom_jeu_valide(nom))
 
 
+class TestEntreeRacineJeuValide(unittest.TestCase):
+    """SEC-024 (audit issue #117) : ``_entree_racine_jeu_valide`` doit
+    accepter tous les noms réels de premier niveau d'un zip de jeu (voir
+    INTEGRATION.md, « zip à plat ») mais refuser tout ce qui pourrait
+    s'injecter dans les commandes batch générées sans échappement.
+    """
+
+    def test_noms_reels_valides(self):
+        for nom in [
+            "Scrabble.exe",
+            "FauxJeu.exe",
+            "_internal",
+            "data",
+            "manifest.json",
+            "Écran de jeu",
+            "Données",
+            "jeu-2_v2",
+        ]:
+            with self.subTest(nom=nom):
+                self.assertTrue(_entree_racine_jeu_valide(nom))
+
+    def test_noms_invalides(self):
+        # Vide, ".", "..", caractère de contrôle, séparateur de chemin,
+        # chemin absolu/lecteur, espace/point en tête ou en fin, et
+        # caractères spéciaux de cmd.exe susceptibles d'une injection de
+        # commande.
+        for nom in [
+            "",
+            ".",
+            "..",
+            "data/../../evasion",
+            "data/sous_dossier",
+            "data\\sous_dossier",
+            "C:windows",
+            " data",
+            "data ",
+            ".data",
+            "data.",
+            "jeu\x00exe",
+            "jeu%nom%",
+            "jeu!nom!",
+            "jeu^nom",
+            "jeu&nom",
+            "jeu|nom",
+            "jeu<nom",
+            "jeu>nom",
+            'jeu"nom',
+        ]:
+            with self.subTest(nom=nom):
+                self.assertFalse(_entree_racine_jeu_valide(nom))
+
+
 class TestAssurerMajJeuEnAttenteEmplacementEtNettoyage(unittest.TestCase):
     """Issue #84 : le bat d'un jeu est désormais écrit sous le dossier
     d'Actualise (``updater_<nom>.bat``), pas dans le dossier du jeu — seul
@@ -998,6 +1051,83 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
         self.assertTrue((self.zone_attente / "scrabble_48.zip").exists())
         self.assertFalse((dossier_jeu / "updater.bat").exists())
         self.assertFalse((dossier_actualise / "updater_scrabble.bat").exists())
+
+    def test_evasion_chemin_actualise_zip_rejete_sans_bat_ni_flag(self):
+        # SEC-025 (audit issue #117, rapport de l'issue #103) : cette
+        # branche (mise à jour d'Actualise lui-même détectée par cette
+        # tâche de fond) générait auparavant le bat + le flag directement,
+        # sans passer par la garde anti-évasion de ``mise_a_jour.py`` —
+        # contrairement à la mise à jour d'un jeu, déjà protégée. Un zip
+        # contenant une entrée ``../`` doit désormais être rejeté avant
+        # toute génération, comme côté jeux.
+        chemin_temp_actualise = Path(self.dossier_temp.name) / "telecharge_actualise_tmp.zip"
+        with zipfile.ZipFile(chemin_temp_actualise, "w") as archive:
+            archive.writestr("manifest.json", json.dumps({"build": 11, "supprimer": []}))
+            archive.writestr("../evasion.txt", "malveillant")
+
+        dossier_actualise = Path(self.dossier_temp.name) / "actualise_install"
+        dossier_actualise.mkdir()
+        self.mock_config.chemin_config_portable.return_value = dossier_actualise
+
+        with patch("actualise.version_check") as mock_version_check, patch(
+            "actualise.mise_a_jour.telecharger_zip"
+        ) as mock_telecharger, patch("actualise.notifications") as mock_notifications, patch(
+            "actualise._generer_updater_bat"
+        ) as mock_generer_bat, patch("actualise._ecrire_flag_maj") as mock_ecrire_flag, self.assertLogs(
+            "actualise", level="ERROR"
+        ) as journal:
+            mock_version_check.verifier_version.side_effect = [{"build": 11, "sha256": "x"}, None]
+            mock_telecharger.return_value = chemin_temp_actualise
+
+            tache_verification_arriere_plan("scrabble")
+
+            mock_generer_bat.assert_not_called()
+            mock_ecrire_flag.assert_not_called()
+            mock_notifications.notifier_ntfy.assert_not_called()
+
+        self.assertFalse((self.zone_attente / "actualise_11.zip").exists())
+        self.assertFalse((self.zone_attente / "actualise_11.zip.sha256").exists())
+        self.assertFalse((dossier_actualise / "updater.bat").exists())
+        self.assertTrue(any("vasion" in message.lower() for message in journal.output))
+
+    def test_entree_jeu_caractere_special_cmd_rejetee_sans_bat_ni_flag(self):
+        # SEC-024 (audit issue #117) : une entrée de premier niveau du
+        # zip d'un jeu est écrite telle quelle, sans échappement, dans les
+        # commandes batch générées (``_bloc_bascule_entree_jeu`` et
+        # consorts) — un caractère spécial de cmd.exe (ici "&") doit être
+        # refusé avant toute génération, comme une évasion de chemin.
+        chemin_temp_scrabble = Path(self.dossier_temp.name) / "telecharge_scrabble_tmp.zip"
+        with zipfile.ZipFile(chemin_temp_scrabble, "w") as archive:
+            archive.writestr("manifest.json", json.dumps({"supprimer": []}))
+            archive.writestr("evil&name.exe", "malveillant")
+
+        dossier_jeu = Path(self.dossier_temp.name) / "jeu_install"
+        dossier_jeu.mkdir()
+        self.configuration["application_cible"]["repertoire_installation"] = str(dossier_jeu)
+
+        dossier_actualise = Path(self.dossier_temp.name) / "actualise_install"
+        dossier_actualise.mkdir()
+        self.mock_config.chemin_config_portable.return_value = dossier_actualise
+
+        with patch("actualise.version_check") as mock_version_check, patch(
+            "actualise.mise_a_jour.telecharger_zip"
+        ) as mock_telecharger, patch("actualise.notifications"), patch(
+            "actualise._generer_updater_bat_jeu"
+        ) as mock_generer_bat_jeu, patch("actualise._ecrire_flag_maj") as mock_ecrire_flag, self.assertLogs(
+            "actualise", level="ERROR"
+        ) as journal:
+            mock_version_check.verifier_version.side_effect = [None, {"build": 48, "sha256": "x"}]
+            mock_telecharger.return_value = chemin_temp_scrabble
+
+            tache_verification_arriere_plan("scrabble")
+
+            mock_generer_bat_jeu.assert_not_called()
+            mock_ecrire_flag.assert_not_called()
+
+        self.assertFalse((self.zone_attente / "scrabble_48.zip").exists())
+        self.assertFalse((dossier_jeu / "actualise_update.flag").exists())
+        self.assertFalse((dossier_actualise / "updater_scrabble.bat").exists())
+        self.assertTrue(any("invalide" in message.lower() for message in journal.output))
 
     def test_pas_de_mise_a_jour_ne_fait_rien(self):
         with patch("actualise.version_check") as mock_version_check, patch(

@@ -75,7 +75,12 @@ mécanisme flag + bat, moyennant les adaptations suivantes :
   (fichiers ou dossiers), avec les mêmes garanties (jamais de
   déplacement direct vers un nom encore existant, restauration complète
   de l'état initial au moindre échec, dans l'ordre inverse des éléments
-  déjà basculés). `manifest["supprimer"]` n'est en revanche **pas**
+  déjà basculés). Chaque nom d'entrée est validé avant génération du bat
+  (`_entree_racine_jeu_valide`, liste blanche contre l'injection de
+  commande dans les blocs batch générés — voir
+  `docs/contexte/bascule_mise_a_jour.md`, « Noms d'entrées de premier
+  niveau d'un zip de jeu », SEC-024). `manifest["supprimer"]` n'est en
+  revanche **pas**
   appliqué par ce bat (contrairement à l'ancienne extraction directe
   qu'il remplace) : limitation connue, le risque d'une implémentation
   batch générique de suppressions ciblées n'étant pas jugé proportionné

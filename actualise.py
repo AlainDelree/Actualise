@@ -157,6 +157,15 @@ _NOM_EXECUTABLE = "Actualise.exe"
 _NOM_DOSSIER_INTERNAL = "_internal"
 _NOM_FLAG_MAJ_ACTUALISE = "actualise_update.flag"
 
+# Dossier d'extraction temporaire utilisé par ``Expand-Archive`` dans les
+# deux gabarits de bat (``EXTRACT_DIR``, voir ``_GABARIT_UPDATER_BAT`` et
+# ``_GABARIT_UPDATER_BAT_JEU``), relatif au dossier sur lequel le bat a
+# fait un ``cd /d`` en tout début de script — à garder synchronisé avec la
+# valeur ``EXTRACT_DIR=maj_bat`` codée en dur dans ces deux gabarits (non
+# paramétrée, pour ne pas y toucher au-delà du nécessaire ; voir SEC-025,
+# audit issue #117).
+_NOM_DOSSIER_EXTRACTION_BAT = "maj_bat"
+
 # Règle de sécurité (audit issue #92/#84) : ``nom`` sert à construire un nom
 # de fichier (``updater_<nom>.bat``) sous le dossier d'Actualise — n'accepter
 # que lettres ASCII/chiffres/``_``/``-`` élimine par construction tout
@@ -172,6 +181,48 @@ def _nom_jeu_valide(nom: str) -> bool:
     génération de bat/flag si ce nom est invalide.
     """
     return bool(_RE_NOM_JEU_VALIDE.match(nom))
+
+
+# Caractères spéciaux de cmd.exe pouvant servir à une injection de commande
+# s'ils apparaissent tels quels dans une entrée de zip écrite sans
+# échappement dans les commandes batch générées (``_bloc_bascule_entree_jeu``,
+# ``_bloc_annulation_entree_jeu``, ``_bloc_nettoyage_backup_jeu`` — voir
+# SEC-024, audit issue #117).
+_CARACTERES_SPECIAUX_CMD = frozenset('%!^&|<>"')
+
+# Caractères de contrôle et séparateurs de chemin interdits dans une entrée
+# de premier niveau d'un zip de jeu : un nom d'entrée ne doit jamais désigner
+# autre chose qu'un simple nom de fichier/dossier, jamais un chemin
+# (``/``/``\\``) ni un chemin absolu/lecteur (``:``).
+_RE_ENTREE_RACINE_JEU_INTERDITE = re.compile(r"[\x00-\x1f\\/:]")
+
+
+def _entree_racine_jeu_valide(nom_entree: str) -> bool:
+    """Vrai si ``nom_entree`` (une entrée de premier niveau d'un zip de
+    jeu, voir ``_lister_entrees_racine_zip``) peut entrer sans risque dans
+    les commandes batch générées pour ce nom (``_bloc_bascule_entree_jeu``
+    et consorts) — SEC-024, audit issue #117.
+
+    Liste blanche prudente dans l'esprit de ``_nom_jeu_valide``, mais qui
+    doit accepter tous les noms réels de premier niveau d'un zip de jeu
+    (voir INTEGRATION.md, « zip à plat » : exécutable et ``_internal\\``
+    directement à la racine, éventuels autres dossiers de ressources) :
+    accepte donc les lettres accentuées, espaces et points internes
+    (ex. ``Scrabble.exe``, ``_internal``, ``data``), mais refuse un nom
+    vide, ``.`` ou ``..`` (ou en contenant), un nom commençant ou finissant
+    par un espace ou un point, tout caractère de contrôle, tout séparateur
+    de chemin, tout chemin absolu/lecteur, et les caractères spéciaux de
+    cmd.exe listés dans ``_CARACTERES_SPECIAUX_CMD``.
+    """
+    if not nom_entree or nom_entree in (".", ".."):
+        return False
+    if ".." in nom_entree:
+        return False
+    if nom_entree[0] in " ." or nom_entree[-1] in " .":
+        return False
+    if _RE_ENTREE_RACINE_JEU_INTERDITE.search(nom_entree):
+        return False
+    return not any(caractere in _CARACTERES_SPECIAUX_CMD for caractere in nom_entree)
 
 
 def _basculer_par_renommage(dossier_source: Path, destination: Path) -> None:
@@ -1196,7 +1247,16 @@ def _assurer_maj_jeu_en_attente(
         )
 
     try:
-        mise_a_jour.valider_entrees_zip(chemin_zip, repertoire_installation)
+        # Validé contre le dossier d'extraction réel du bat
+        # (``repertoire_installation / "maj_bat"``), pas contre
+        # ``repertoire_installation`` lui-même (écart corrigé par SEC-025,
+        # audit issue #117, rapport de l'issue #103) : c'est bien sous
+        # ``EXTRACT_DIR`` (``maj_bat``, voir ``_GABARIT_UPDATER_BAT_JEU``)
+        # que ``Expand-Archive`` extrait réellement, après le ``cd /d``
+        # vers ``dossier_jeu`` en tout début de script.
+        mise_a_jour.valider_entrees_zip(
+            chemin_zip, repertoire_installation / _NOM_DOSSIER_EXTRACTION_BAT
+        )
     except ValueError as erreur:
         # Évasion de chemin détectée dans le zip (pattern « zip slip ») —
         # voir SEC-025 (audit issue #92) : l'extraction de ce zip se fait
@@ -1223,6 +1283,37 @@ def _assurer_maj_jeu_en_attente(
 
     try:
         entrees_racine = _lister_entrees_racine_zip(chemin_zip)
+    except (OSError, zipfile.BadZipFile) as erreur:
+        _LOGGER.error(
+            "Échec de la lecture des entrées du zip de mise à jour pour %s "
+            "(build %s) : %s — zip conservé pour nouvelle tentative.",
+            nom_app,
+            build_zip,
+            erreur,
+        )
+        return
+
+    entrees_invalides = [nom for nom in entrees_racine if not _entree_racine_jeu_valide(nom)]
+    if entrees_invalides:
+        # Nom d'entrée de premier niveau invalide (SEC-024, audit issue
+        # #117) : écrit tel quel dans les commandes batch générées
+        # (``_bloc_bascule_entree_jeu`` et consorts) sans échappement — un
+        # nom contenant un caractère spécial de cmd.exe ou un séparateur
+        # de chemin pourrait y injecter une commande. Traité comme une
+        # évasion de chemin (même traitement que la garde anti-évasion
+        # ci-dessus) : rejet fail-safe, ni bat ni flag générés, le zip est
+        # retiré pour ne pas être rejoué à chaque lancement.
+        _LOGGER.error(
+            "Zip de mise à jour de %s rejeté (nom d'entrée de premier niveau "
+            "invalide %r) : zip retiré, sera retéléchargé au prochain contrôle.",
+            nom_app,
+            entrees_invalides[0],
+        )
+        chemin_zip.unlink(missing_ok=True)
+        _chemin_empreinte_zip(chemin_zip).unlink(missing_ok=True)
+        return
+
+    try:
         chemin_bat = _generer_updater_bat_jeu(
             chemin_zip,
             repertoire_installation,
@@ -1234,7 +1325,7 @@ def _assurer_maj_jeu_en_attente(
             build_zip,
             entrees_racine,
         )
-    except (OSError, zipfile.BadZipFile) as erreur:
+    except OSError as erreur:
         _LOGGER.error(
             "Échec de la génération du bat de mise à jour pour %s (build %s) : "
             "%s — zip conservé pour nouvelle tentative.",
@@ -1336,6 +1427,42 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
                 # à son prochain démarrage et laisse l'utilisateur
                 # choisir via ActualiseUI.exe (voir
                 # docs/contexte/actualiseui_dialogue.md).
+                try:
+                    # Validé contre le dossier d'extraction réel du bat
+                    # (``config.chemin_config_portable() / "maj_bat"``,
+                    # voir ``EXTRACT_DIR`` dans ``_GABARIT_UPDATER_BAT``)
+                    # avant même de générer ce bat — SEC-025 (audit issue
+                    # #117, rapport de l'issue #103) : cette branche
+                    # (mise à jour d'Actualise lui-même, détectée par
+                    # cette même tâche de fond) ne passait auparavant par
+                    # aucune garde anti-évasion, contrairement à la mise
+                    # à jour d'un jeu (``_assurer_maj_jeu_en_attente``) ni
+                    # à l'extraction Python directe
+                    # (``mise_a_jour.extraire_zip``, utilisée par
+                    # ``appliquer_mises_a_jour_en_attente`` quand aucun
+                    # flag n'est encore en attente).
+                    mise_a_jour.valider_entrees_zip(
+                        chemin_zone_attente,
+                        config.chemin_config_portable() / _NOM_DOSSIER_EXTRACTION_BAT,
+                    )
+                except ValueError as erreur:
+                    _LOGGER.error(
+                        "Zip de mise à jour d'Actualise rejeté (évasion de chemin "
+                        "détectée, %s) : zip retiré, sera retéléchargé au prochain "
+                        "contrôle.",
+                        erreur,
+                    )
+                    chemin_zone_attente.unlink(missing_ok=True)
+                    _chemin_empreinte_zip(chemin_zone_attente).unlink(missing_ok=True)
+                    continue
+                except zipfile.BadZipFile:
+                    # Zip illisible : transitoire, laissé à une tentative
+                    # ultérieure (même traitement que côté jeux, voir
+                    # ``_assurer_maj_jeu_en_attente``) — ``_generer_updater_bat``
+                    # ci-dessous n'a de toute façon pas besoin de lire le
+                    # contenu du zip.
+                    pass
+
                 try:
                     chemin_flag = (
                         Path(configuration["application_cible"]["repertoire_installation"])
