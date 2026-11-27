@@ -33,15 +33,20 @@ correspondant à l'argument `--config <nom>` passé à Actualise (voir
 }
 ```
 
+`topic_ntfy` est **facultatif** (voir plus bas) : un `config_<nom_app>.json`
+sans ce champ est valide, par exemple pour une application cible qui n'a
+pas de topic ntfy dédié.
+
 `config.charger_config(nom_app)` lit les deux fichiers et les fusionne
 en un seul dict `{"actualise": ..., "application_cible": ...,
 "zone_attente": ..., "topic_ntfy": ...}`, compatible avec la structure
 déjà utilisée par le reste d'Actualise (`zone_attente` extrait de
 `config_actualise.json`, `topic_ntfy` copié depuis
-`application_cible` par commodité pour l'appelant). L'absence de l'un
-ou l'autre fichier, ou un JSON malformé, reste **bloquant** :
-`FileNotFoundError`/`json.JSONDecodeError` remontent telles quelles,
-sans repli silencieux.
+`application_cible` par commodité pour l'appelant, ou `None` si absent
+de `application_cible`). L'absence de l'un ou l'autre fichier, ou un
+JSON malformé, reste **bloquant** : `FileNotFoundError`/
+`json.JSONDecodeError` remontent telles quelles, sans repli silencieux
+— seul `topic_ntfy` fait exception à cette règle de blocage.
 
 Détail des champs :
 
@@ -80,19 +85,24 @@ Détail des champs :
   applications cibles gérées par cette installation, cohérent avec le
   fait qu'il n'existe plus qu'une seule installation d'Actualise à
   gérer (voir « Configuration portable »).
-- `topic_ntfy` (dans `config_<nom_app>.json`) : topic ntfy dédié à ce
-  programme — règle par défaut : un topic ntfy dédié par programme
-  géré. **Cas particulier Scrabble** : pour ce projet spécifiquement,
-  `topic_ntfy` réutilise le topic déjà existant des notifications
-  d'issues fermées de Bridge_Agent pour Scrabble — pas de topic dédié
-  séparé créé, car seul Alain est abonné aux deux flux et le préfixe
-  `"MAJ - "` des notifications d'Actualise suffit à les distinguer
-  visuellement des notifications de clôture d'issue dans le même flux.
-  Le principe général « un topic ntfy dédié par programme géré » reste
-  la règle par défaut pour de futurs projets ayant un public
-  destinataire différent (ex. un autre utilisateur final abonné) ;
-  Scrabble est un cas particulier documenté comme tel, pas un
-  changement de règle générale.
+- `topic_ntfy` (dans `config_<nom_app>.json`, **facultatif**) : topic
+  ntfy dédié à ce programme, s'il en a un — règle par défaut quand il
+  est présent : un topic ntfy dédié par programme géré. Absent, vide
+  ou autre chose qu'un texte : Actualise désactive simplement la
+  notification ntfy pour cette application cible (aucune erreur,
+  aucune interruption du flux de vérification/mise à jour) — c'est le
+  cas de **Rummikub**, qui a retiré ntfy (son issue #271) et dont
+  l'installeur n'écrit plus ce champ. **Cas particulier Scrabble** :
+  pour ce projet spécifiquement, `topic_ntfy` réutilise le topic déjà
+  existant des notifications d'issues fermées de Bridge_Agent pour
+  Scrabble — pas de topic dédié séparé créé, car seul Alain est abonné
+  aux deux flux et le préfixe `"MAJ - "` des notifications d'Actualise
+  suffit à les distinguer visuellement des notifications de clôture
+  d'issue dans le même flux. Le principe général « un topic ntfy dédié
+  par programme géré » reste la règle par défaut pour de futurs projets
+  ayant un public destinataire différent (ex. un autre utilisateur
+  final abonné) ; Scrabble est un cas particulier documenté comme tel,
+  pas un changement de règle générale.
 
 `repertoire_installation` reste un chemin propre à l'application cible
 (ex. `C:\Scrabble\`), indépendant du dossier d'Actualise lui-même

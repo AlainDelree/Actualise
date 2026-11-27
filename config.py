@@ -112,7 +112,9 @@ def charger_config(nom_app: str) -> dict[str, Any]:
     - ``application_cible`` : contenu entier de config_<nom_app>.json
     - ``zone_attente`` : depuis config_actualise.json
     - ``topic_ntfy`` : copié depuis ``application_cible``, pour
-      compatibilité avec l'appelant actuel
+      compatibilité avec l'appelant actuel. Facultatif : ``None`` si
+      absent de ``config_<nom_app>.json`` (voir
+      docs/contexte/configuration.md, « topic_ntfy »).
 
     L'absence de configuration valide est bloquante pour Actualise (à
     la différence de ``verifier_version``, pas de repli silencieux
@@ -133,7 +135,7 @@ def charger_config(nom_app: str) -> dict[str, Any]:
         "actualise": bloc_actualise,
         "application_cible": config_app,
         "zone_attente": zone_attente,
-        "topic_ntfy": config_app["topic_ntfy"],
+        "topic_ntfy": config_app.get("topic_ntfy"),
     }
 
 

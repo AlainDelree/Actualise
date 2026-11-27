@@ -1037,6 +1037,38 @@ class TestTacheVerificationArrierePlan(unittest.TestCase):
         self.assertTrue((self.zone_attente / "actualise_11.zip").exists())
         self.assertTrue((self.zone_attente / "scrabble_48.zip").exists())
 
+    def test_topic_ntfy_absent_aucune_notification_mais_maj_appliquee(self):
+        # topic_ntfy facultatif (issue #108) : Rummikub ne l'écrit plus
+        # depuis son issue #271. Son absence (``None`` depuis
+        # ``config.charger_config``) ne doit ni lever d'exception, ni
+        # envoyer de notification — mais la mise à jour (zip mis en
+        # zone d'attente) doit tout de même s'appliquer normalement.
+        self.configuration["topic_ntfy"] = None
+
+        chemin_temp_actualise = Path(self.dossier_temp.name) / "telecharge_actualise_tmp.zip"
+        chemin_temp_actualise.write_bytes(b"contenu-actualise")
+        chemin_temp_scrabble = Path(self.dossier_temp.name) / "telecharge_scrabble_tmp.zip"
+        chemin_temp_scrabble.write_bytes(b"contenu-scrabble")
+
+        with patch("actualise.version_check") as mock_version_check, patch(
+            "actualise.mise_a_jour"
+        ) as mock_mise_a_jour, patch("actualise.notifications") as mock_notifications:
+            mock_version_check.verifier_version.side_effect = [
+                {"build": 11, "sha256": "hash-actualise"},
+                {"build": 48, "sha256": "hash-scrabble"},
+            ]
+            mock_mise_a_jour.telecharger_zip.side_effect = [
+                chemin_temp_actualise,
+                chemin_temp_scrabble,
+            ]
+
+            tache_verification_arriere_plan("scrabble")
+
+            mock_notifications.notifier_ntfy.assert_not_called()
+
+        self.assertTrue((self.zone_attente / "actualise_11.zip").exists())
+        self.assertTrue((self.zone_attente / "scrabble_48.zip").exists())
+
     def test_bat_updater_genere_avec_le_build_reellement_telecharge(self):
         # Non-régression issue #66 : le bat généré pour la mise à jour
         # d'Actualise via la fenêtre/updater.bat doit recevoir le numéro

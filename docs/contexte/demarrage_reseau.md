@@ -42,7 +42,11 @@ arrière-plan, puis se termine.
      invalide, évasion de chemin, voir
      `docs/contexte/bascule_mise_a_jour.md`, « Noms d'entrées de premier
      niveau d'un zip de jeu ») : cette notification serait alors fausse,
-     puisque le zip vient d'être retiré (issue #105, point 3).
+     puisque le zip vient d'être retiré (issue #105, point 3) ; ou sauf si
+     `topic_ntfy` est absent de `config_<nom_app>.json` (champ
+     **facultatif**, voir `docs/contexte/configuration.md`) — la mise à
+     jour est tout de même téléchargée et appliquée normalement, seule la
+     notification est omise.
 
 **Cycle de vie du processus Actualise.** Actualise ne lance plus
 l'application cible et n'a donc plus aucun lien avec son cycle de vie :

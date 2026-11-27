@@ -137,6 +137,34 @@ class TestChargerConfig(unittest.TestCase):
             },
         )
 
+    def test_chargement_sans_topic_ntfy_rend_le_champ_facultatif(self):
+        # Rummikub a retiré ntfy (son issue #271) : son installeur
+        # n'écrit plus ce champ — voir issue #108. Le chargement ne
+        # doit pas lever de KeyError, et ``topic_ntfy`` vaut ``None``.
+        self._ecrire_config_actualise(
+            {
+                "build_installe": 6,
+                "depot_github": "AlainDelree/Actualise",
+                "zone_attente": "C:\\Actualise\\attente\\",
+            }
+        )
+        self._ecrire_config_app(
+            "rummikub",
+            {
+                "nom": "Rummikub",
+                "depot_github": "AlainDelree/Rummikub",
+                "build_installe": 5,
+                "repertoire_installation": "C:\\Rummikub\\",
+                "executable": "Rummikub.exe",
+                "icone": "C:\\Rummikub\\Rummikub.ico",
+            },
+        )
+
+        configuration = charger_config("rummikub")
+
+        self.assertIsNone(configuration["topic_ntfy"])
+        self.assertNotIn("topic_ntfy", configuration["application_cible"])
+
     def test_fichier_actualise_absent_leve_une_exception(self):
         self._ecrire_config_app("scrabble", {"topic_ntfy": "actualise-scrabble"})
 

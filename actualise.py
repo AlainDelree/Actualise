@@ -1550,11 +1550,23 @@ def tache_verification_arriere_plan(nom_app: str) -> None:
                 ):
                     continue
 
-            notifications.notifier_ntfy(
-                configuration["topic_ntfy"],
-                f"MAJ - Mise à jour disponible pour {prefixe} (build {build_distant}) : "
-                "elle sera appliquée au prochain lancement.",
-            )
+            topic_ntfy = configuration["topic_ntfy"]
+            if isinstance(topic_ntfy, str) and topic_ntfy:
+                notifications.notifier_ntfy(
+                    topic_ntfy,
+                    f"MAJ - Mise à jour disponible pour {prefixe} (build {build_distant}) : "
+                    "elle sera appliquée au prochain lancement.",
+                )
+            else:
+                # topic_ntfy facultatif (issue #108) : absent, vide ou
+                # d'un autre type que texte, ex. config_<nom_app>.json sans
+                # ce champ (ntfy retiré côté application cible, comme
+                # Rummikub depuis son issue #271). Aucune notification,
+                # aucune interruption du flux.
+                _LOGGER.debug(
+                    "topic_ntfy absent ou vide : notification ntfy non envoyée pour %s.",
+                    prefixe,
+                )
     except Exception:
         _LOGGER.exception("Erreur inattendue dans la tâche de vérification en arrière-plan")
 

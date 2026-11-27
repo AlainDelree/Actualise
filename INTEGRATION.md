@@ -52,6 +52,7 @@ Actualise est une instance unique partagée entre toutes les applications cibles
   "topic_ntfy": "mon-topic-ntfy"
 }
 ```
+`topic_ntfy` est **facultatif** : s'il est absent, Actualise continue de vérifier et d'appliquer les mises à jour normalement, simplement sans notification ntfy. Rummikub, par exemple, ne l'écrit plus depuis le retrait de ntfy côté Rummikub (son issue #271).
 
 ## 5. Format des Releases GitHub de l'application cible
 
@@ -127,7 +128,9 @@ Même remarque : ce gestionnaire s'applique indifféremment à une mise à jour 
 
 ## 8. Convention ntfy
 
-`topic_ntfy` peut être réutilisé depuis un topic existant (avec préfixe `"MAJ - "` pour distinguer les messages) ou dédié à l'application cible. Les deux sont valables.
+`topic_ntfy` est **facultatif** dans `config_<nom>.json` : si l'application cible n'utilise pas ntfy, ne pas écrire ce champ (ou l'écrire vide) — Actualise désactive alors simplement la notification, sans erreur ni interruption de la vérification/mise à jour.
+
+Si `topic_ntfy` est présent, il peut être réutilisé depuis un topic existant (avec préfixe `"MAJ - "` pour distinguer les messages) ou dédié à l'application cible. Les deux sont valables.
 
 ## 9. Bug bootstrap connu
 
